@@ -115,13 +115,24 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
    ./scripts/maco-gen --config mcp.json --workspace .maco --clean
    ```
 
-2. Inspect what was generated before writing code:
+   The command prints the generated workspace and a suggested `rg --files ...`
+   command. Treat that as the starting point for discovery.
+
+2. Discover available wrappers progressively. List generated modules first, then
+   inspect only the server `__init__.py` and specific tool wrappers needed for
+   the task. Avoid reading `.maco/manifest.json` by default because it can pull
+   every tool/schema into context at once.
 
    ```bash
-   find .maco/maco_generated/servers -maxdepth 3 -type f | sort
-   sed -n '1,200p' .maco/maco_generated/servers/<server>/<tool>.py
-   cat .maco/manifest.json
+   rg --files .maco/maco_generated/servers
+   sed -n '1,160p' .maco/maco_generated/servers/<server>/__init__.py
+   sed -n '1,220p' .maco/maco_generated/servers/<server>/<tool>.py
    ```
+
+   Use `rg --files ... | rg '<keyword>'` when you have a likely tool name, for
+   example `rg --files .maco/maco_generated/servers | rg 'screenshot|navigate'`.
+   `manifest.json` is only for broad audits or automation that needs the full
+   generated index.
 
 3. Start the gateway in tmux so it stays alive:
 
@@ -147,7 +158,7 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
    print(content)
    ```
 
-   Tool functions accept either a single dict or keyword arguments:
+   Tool functions accept either a Pydantic input model, a single dict, or keyword arguments:
 
    ```python
    result = someTool({"query": "hello"})
@@ -164,17 +175,23 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
 
 ## Return values
 
-Generated functions return:
+Generated functions return Pydantic output models when an output schema is
+available. Access fields as attributes:
+
+```python
+out = someTool(query="hello")
+print(out.result)
+```
+
+For JSON keys that are not valid Python identifiers, use the generated field
+name shown in the wrapper; Pydantic aliases preserve the original MCP key when
+calling the server.
+
+At the low-level client boundary, generated functions normalize MCP responses in this order:
 
 1. MCP `structuredContent` when present;
 2. otherwise joined text content parsed as JSON if possible;
 3. otherwise plain text.
-
-For FastMCP tools with structured output, expect dictionaries like:
-
-```python
-{"result": 42}
-```
 
 ## When to use this instead of direct MCP tools
 

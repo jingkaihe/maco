@@ -90,8 +90,6 @@ async def generate_async(
                     "function": func_name,
                     "module": f"maco_generated.servers.{server_module}.{func_name}",
                     "description": tool.get("description") or "",
-                    "input_schema": tool.get("inputSchema") or {},
-                    "output_schema": tool.get("outputSchema") or None,
                 }
             )
             tool_count += 1

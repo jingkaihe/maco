@@ -65,7 +65,7 @@ def _cmd_gen(args: argparse.Namespace) -> int:
     )
     print(f"Generated {stats.tool_count} tools from {stats.server_count} servers")
     print(f"Workspace: {stats.workspace}")
-    print("Explore: fd . {}/maco_generated/servers".format(stats.workspace))
+    print("Explore: rg --files {}/maco_generated/servers".format(stats.workspace))
     return 0
 
 
