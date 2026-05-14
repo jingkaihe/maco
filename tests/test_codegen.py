@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import sys
+from types import ModuleType
+from typing import Any
 
 from maco.codegen import _sanitize_identifier, _schema_type_source, _typed_dict_source
 
@@ -34,6 +37,42 @@ def test_typed_dict_source_uses_json_property_names():
         str(Path("generated.py")),
         "exec",
     )
+
+
+def test_generated_models_validate_nested_aliases():
+    typed = _schema_type_source(
+        "SearchInput",
+        {
+            "type": "object",
+            "required": ["query-text", "filters"],
+            "properties": {
+                "query-text": {"type": "string"},
+                "filters": {
+                    "type": "object",
+                    "required": ["max-results"],
+                    "properties": {
+                        "max-results": {"type": "integer", "minimum": 1},
+                        "include-archived": {"type": "boolean"},
+                    },
+                },
+            },
+        },
+    )
+    namespace = _exec_generated_source(typed.source)
+
+    search_input = namespace["SearchInput"].model_validate(
+        {
+            "query-text": "mcp",
+            "filters": {"max-results": 5},
+        }
+    )
+
+    assert search_input.query_text == "mcp"
+    assert search_input.filters.max_results == 5
+    assert search_input.model_dump(by_alias=True, exclude_none=True) == {
+        "query-text": "mcp",
+        "filters": {"max-results": 5},
+    }
 
 
 def test_schema_type_source_generates_typed_output_aliases():
@@ -85,3 +124,15 @@ def test_schema_type_source_generates_root_model_for_scalar_schema():
         str(Path("generated.py")),
         "exec",
     )
+
+
+def _exec_generated_source(source: str) -> dict[str, Any]:
+    module = ModuleType("generated_test_models")
+    namespace = module.__dict__
+    sys.modules[module.__name__] = module
+    exec(
+        "import typing as _t\nfrom pydantic import BaseModel, ConfigDict, Field, RootModel\n"
+        + source,
+        namespace,
+    )
+    return namespace
