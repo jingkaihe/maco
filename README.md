@@ -37,3 +37,7 @@ See [`SKILL.md`](SKILL.md) for an agent-facing workflow.
 For environment variables, put them under `env`. `maco` expands `$VAR` and
 `${VAR}` using the environment of the process running `maco`, then passes the
 resolved values to the MCP server subprocess.
+
+## License
+
+Apache License 2.0. See [`LICENSE`](LICENSE).
