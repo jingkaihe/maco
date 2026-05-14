@@ -1,0 +1,27 @@
+[project]
+name = "mcp-as-code"
+version = "0.1.0"
+description = "Execute MCP tools through generated Python code interfaces"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp>=1.24.0",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+maco = "maco.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.14.0",
+    "ty>=0.0.35",
+]
+
+[tool.uv.build-backend]
+module-name = "maco"
