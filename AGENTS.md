@@ -13,9 +13,7 @@ uv run ty check src tests
 uv run maco --help
 ```
 
-`ruff` plus `ty` covers source syntax and static typing for normal development. Use
-`python -m compileall` only as a targeted smoke test for generated code or unusual
-dynamic-code changes.
+`ruff` plus `ty` covers source syntax and static typing for normal development. Use `python -m compileall` only as a targeted smoke test for generated code or unusual dynamic-code changes.
 
 Script wrappers for skill/drop-in usage:
 
