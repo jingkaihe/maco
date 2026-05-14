@@ -26,7 +26,7 @@ Generated tool functions call a local gateway process. The gateway owns the MCP 
 
 ## Commands
 
-From this repository/skill directory:
+Use the script wrappers from this repository/skill directory:
 
 ```bash
 ./scripts/maco-gen --config mcp.json --workspace .maco --clean
@@ -34,13 +34,7 @@ From this repository/skill directory:
 ./scripts/maco-run --workspace .maco path/to/code.py
 ```
 
-If installed as a Python package, the equivalent CLI is:
-
-```bash
-uv run maco gen --config mcp.json --workspace .maco --clean
-uv run maco serve --config mcp.json --workspace .maco
-uv run maco run --workspace .maco path/to/code.py
-```
+If installed as a Python package, use the same subcommands through `uv run maco ...`.
 
 Defaults:
 
@@ -105,7 +99,7 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
 1. Generate interfaces:
 
    ```bash
-   ./scripts/maco-gen --config mcp.json --workspace .maco --clean
+   ./scripts/maco-gen --clean
    ```
 
    The command prints the generated workspace and a suggested `rg --files ...` command. Treat that as the starting point for discovery.
@@ -123,7 +117,7 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
 3. Start the gateway in tmux so it stays alive:
 
    ```bash
-   tmux -L llm-agent new-session -d -s maco-gateway './scripts/maco-serve --config mcp.json --workspace .maco 2>&1'
+   tmux -L llm-agent new-session -d -s maco-gateway './scripts/maco-serve 2>&1'
    tmux -L llm-agent capture-pane -t maco-gateway -p -S -50
    ```
 
@@ -154,7 +148,7 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
 5. Run the code:
 
    ```bash
-   ./scripts/maco-run --workspace .maco ./analysis.py
+   ./scripts/maco-run ./analysis.py
    ```
 
    `maco-run` sets `PYTHONPATH`, `MACO_WORKSPACE`, `MACO_GATEWAY_FILE`, `MACO_GATEWAY_URL`, and `MACO_GATEWAY_TOKEN` from `.maco/gateway.json`.

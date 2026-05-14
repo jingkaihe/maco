@@ -1,8 +1,6 @@
-# mcp-as-code Workspace Notes
-
 ## Project overview
 
-`mcp-as-code` (`maco`) is a Python implementation of the MCP code-execution pattern from Kodelet and Anthropic's MCP code-execution article. It generates Python wrappers for MCP tools, runs a local gateway that owns MCP client sessions, and runs user Python scripts through `uv` with the generated workspace on `PYTHONPATH`.
+`mcp-as-code` (`maco`) is a Python implementation of the MCP code-execution pattern from Kodelet based on Anthropic's MCP code-execution article. It generates Python wrappers for MCP tools, runs a local gateway that owns MCP client sessions, and runs user Python scripts through `uv` with the generated workspace on `PYTHONPATH`.
 
 ## Common commands
 
@@ -15,12 +13,12 @@ uv run maco --help
 
 `ruff` plus `ty` covers source syntax and static typing for normal development. Use `python -m compileall` only as a targeted smoke test for generated code or unusual dynamic-code changes.
 
-Script wrappers for skill/drop-in usage:
+Script wrappers mirror the CLI subcommands for skill/drop-in usage:
 
 ```bash
-./scripts/maco-gen --config mcp.json --workspace .maco --clean
-./scripts/maco-serve --config mcp.json --workspace .maco
-./scripts/maco-run --workspace .maco path/to/code.py
+./scripts/maco-gen --help
+./scripts/maco-serve --help
+./scripts/maco-run --help
 ```
 
 ## Structure
