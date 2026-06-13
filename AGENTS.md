@@ -30,7 +30,7 @@ Script wrappers mirror the CLI subcommands for skill/drop-in usage:
 - `src/maco/gateway.py` — localhost JSON/HTTP gateway used by generated wrappers.
 - `src/maco/runner.py` — `uv run` execution helper that injects workspace/gateway env.
 - `src/maco/sandbox/` — provider-based sandbox package with local, Docker, and Matchlock providers.
-- `src/maco/serve_mcp.py` — experimental HTTP MCP server exposing sandboxed `bash` and `code_executor`.
+- `src/maco/serve_mcp.py` — experimental HTTP MCP server exposing sandboxed `bash` and `code_execute`.
 - `src/maco/cli.py` — `maco gen`, `maco serve`, `maco run`.
 - `tests/unit/` — fast unit tests.
 - `tests/integration/` — end-to-end tests that may start real MCP/gateway/sandbox processes.

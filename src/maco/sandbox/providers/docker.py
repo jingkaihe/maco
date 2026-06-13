@@ -12,7 +12,7 @@ from .base import BaseSandboxProvider
 class DockerSandboxProvider(BaseSandboxProvider):
     """Run commands in a one-shot Docker container."""
 
-    guest_workspace = "/maco"
+    guest_workspace = "/workspace/.maco"
     guest_scratch = "/workspace"
 
     def __init__(
@@ -51,9 +51,9 @@ class DockerSandboxProvider(BaseSandboxProvider):
         command.extend(
             [
                 "-v",
-                f"{self.context.workspace}:{self.guest_workspace}:ro",
-                "-v",
                 f"{self.context.scratch}:{self.guest_scratch}",
+                "-v",
+                f"{self.context.workspace}:{self.guest_workspace}:ro",
                 "-w",
                 self.guest_scratch,
                 self.image,

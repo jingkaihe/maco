@@ -29,7 +29,7 @@ def test_serve_mcp_local_tools_call_real_backend_with_generated_wrappers(tmp_pat
             payloads = asyncio.run(_call_wrapper_tool_values(mcp_url))
 
     bash_payload = payloads["bash"]
-    code_payload = payloads["code_executor"]
+    code_payload = payloads["code_execute"]
     _assert_successful_command(bash_payload)
     _assert_successful_command(code_payload)
     assert _last_json_line(bash_payload["stdout"]) == {"echo": "bash-wrapper", "total": 42}
@@ -88,7 +88,7 @@ def test_serve_mcp_providers_call_real_backend_with_generated_client(tmp_path, p
         "echo": f"bash-client:{provider}",
         "total": 34,
     }
-    assert _last_json_line(payloads["code_executor"]["stdout"]) == {
+    assert _last_json_line(payloads["code_execute"]["stdout"]) == {
         "echo": f"code-client:{provider}",
         "total": 56,
     }
@@ -111,7 +111,7 @@ message = echo(message="code-wrapper")
 total = add(a=6, b=7)
 print(json.dumps({"echo": message.result, "total": total.result}, sort_keys=True))
 '''
-    return await _call_bash_and_code_executor(
+    return await _call_bash_and_code_execute(
         mcp_url,
         bash_command=_python_heredoc(bash_script),
         code=code,
@@ -141,7 +141,7 @@ echo = call_mcp_tool("echo-server", "echo", {"message": f"code-client:{args.labe
 total = call_mcp_tool("echo-server", "add", {"a": 50, "b": 6})["result"]
 print(json.dumps({"echo": echo, "total": total}, sort_keys=True))
 '''
-    return await _call_bash_and_code_executor(
+    return await _call_bash_and_code_execute(
         mcp_url,
         bash_command=_python_heredoc(bash_script),
         code=code,
@@ -150,7 +150,7 @@ print(json.dumps({"echo": echo, "total": total}, sort_keys=True))
     )
 
 
-async def _call_bash_and_code_executor(
+async def _call_bash_and_code_execute(
     mcp_url: str,
     *,
     bash_command: str,
@@ -163,11 +163,11 @@ async def _call_bash_and_code_executor(
             await session.initialize()
             tools = await session.list_tools()
             tool_names = {tool.name for tool in tools.tools}
-            assert {"bash", "code_executor"}.issubset(tool_names)
+            assert {"bash", "code_execute"}.issubset(tool_names)
 
             bash_result = await session.call_tool("bash", {"command": bash_command, "timeout": 120})
             code_result = await session.call_tool(
-                "code_executor",
+                "code_execute",
                 {
                     "code": code,
                     "filename": filename,
@@ -177,7 +177,7 @@ async def _call_bash_and_code_executor(
             )
     return {
         "bash": _tool_payload(bash_result),
-        "code_executor": _tool_payload(code_result),
+        "code_execute": _tool_payload(code_result),
     }
 
 
@@ -377,7 +377,7 @@ async def _wait_for_mcp_server(process: subprocess.Popen[str], mcp_url: str) -> 
                     await session.initialize()
                     tools = await session.list_tools()
                     tool_names = {tool.name for tool in tools.tools}
-                    if {"bash", "code_executor"}.issubset(tool_names):
+                    if {"bash", "code_execute"}.issubset(tool_names):
                         return
         except Exception as exc:
             last_error = exc

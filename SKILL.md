@@ -102,17 +102,17 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
    ./scripts/maco-gen --clean
    ```
 
-   The command prints the generated workspace and a suggested `rg --files ...` command. Treat that as the starting point for discovery.
+   The command prints the generated workspace and a suggested `find ...` command. Treat that as the starting point for discovery.
 
 2. Discover available wrappers progressively. List generated modules first, then inspect only the server `__init__.py` and specific tool wrappers needed for the task. Avoid reading `.maco/manifest.json` by default because it can pull every tool/schema into context at once.
 
    ```bash
-   rg --files .maco/maco_generated/servers
+   find .maco/maco_generated/servers -maxdepth 2 -type f
    sed -n '1,160p' .maco/maco_generated/servers/<server>/__init__.py
    sed -n '1,220p' .maco/maco_generated/servers/<server>/<tool>.py
    ```
 
-   Use `rg --files ... | rg '<keyword>'` when you have a likely tool name, for example `rg --files .maco/maco_generated/servers | rg 'screenshot|navigate'`. `manifest.json` is only for broad audits or automation that needs the full generated index.
+   Use `find ... | grep '<keyword>'` when you have a likely tool name, for example `find .maco/maco_generated/servers -maxdepth 2 -type f | grep -E 'screenshot|navigate'`. If `rg` is installed, it is a convenient faster substitute for `find`/`grep`, but generated-wrapper discovery does not require it. `manifest.json` is only for broad audits or automation that needs the full generated index.
 
 3. Start the gateway in tmux so it stays alive:
 

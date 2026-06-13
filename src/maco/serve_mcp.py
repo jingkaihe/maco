@@ -6,6 +6,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from jinja2 import Environment, PackageLoader, StrictUndefined
+from mcp.server.fastmcp import FastMCP
+
 from .sandbox import (
     GatewayInfo,
     SandboxContext,
@@ -16,7 +19,14 @@ from .sandbox import (
     provider_from_name,
     write_code_file,
 )
-from mcp.server.fastmcp import FastMCP
+
+
+_TEMPLATES = Environment(
+    loader=PackageLoader("maco", "templates"),
+    trim_blocks=True,
+    lstrip_blocks=True,
+    undefined=StrictUndefined,
+)
 
 
 @dataclass(frozen=True)
@@ -99,36 +109,20 @@ def create_serve_mcp_app(
 
     app = FastMCP(
         "maco-serve-mcp",
-        instructions=(
-            "Run shell and Python code in a sandbox with generated maco wrappers. "
-            "Use bash for discovery (`fd`, `rg`, `sed`) and code_executor for "
-            "Python scripts that import maco_generated wrappers."
-        ),
+        instructions=_mcp_instructions(provider, context),
         host=host,
         port=port,
         json_response=True,
         stateless_http=True,
     )
 
-    @app.tool(
-        description=(
-            "Run a non-interactive shell command inside the configured sandbox. "
-            "The generated maco workspace is available via MACO_WORKSPACE and "
-            "PYTHONPATH; the MCP gateway is available via MACO_GATEWAY_URL."
-        )
-    )
+    @app.tool(description=_bash_description(provider, context))
     def bash(command: str, timeout: int | None = None) -> dict[str, Any]:
         result = provider.run(SandboxExec(command=command, timeout=timeout))
         return _result_payload(result)
 
-    @app.tool(
-        description=(
-            "Write Python code into the sandbox scratch directory and run it with "
-            "generated maco wrappers on PYTHONPATH. The script can import from "
-            "maco_generated.servers.<server>."
-        )
-    )
-    def code_executor(
+    @app.tool(description=_code_execute_description(provider, context))
+    def code_execute(
         code: str,
         filename: str = "task.py",
         args: list[str] | None = None,
@@ -144,6 +138,46 @@ def create_serve_mcp_app(
         return payload
 
     return app
+
+
+def _mcp_instructions(provider: SandboxProvider, context: SandboxContext) -> str:
+    return _render_model_text("serve_mcp_instructions.j2", provider, context)
+
+
+def _bash_description(provider: SandboxProvider, context: SandboxContext) -> str:
+    return _render_model_text("bash_description.j2", provider, context)
+
+
+def _code_execute_description(provider: SandboxProvider, context: SandboxContext) -> str:
+    return _render_model_text("code_execute_description.j2", provider, context)
+
+
+def _render_model_text(template_name: str, provider: SandboxProvider, context: SandboxContext) -> str:
+    wrapper_root = _guest_server_root(provider)
+    return _TEMPLATES.get_template(template_name).render(
+        server_catalog_lines=_server_catalog_lines(context.workspace, wrapper_root=wrapper_root),
+        wrapper_root=wrapper_root,
+    ).strip()
+
+
+def _server_catalog_lines(workspace: Path, *, wrapper_root: str, limit: int = 50) -> list[str]:
+    server_root = workspace / "maco_generated" / "servers"
+    modules = sorted(
+        path.name
+        for path in server_root.iterdir()
+        if path.is_dir() and (path / "__init__.py").exists()
+    ) if server_root.exists() else []
+    if not modules:
+        return ["Available generated server modules: none found."]
+    lines = ["Available generated server modules:"]
+    lines.extend(f"- {module}: {wrapper_root}/{module}" for module in modules[:limit])
+    if len(modules) > limit:
+        lines.append(f"- ... {len(modules) - limit} more not shown")
+    return lines
+
+
+def _guest_server_root(provider: SandboxProvider) -> str:
+    return f"{provider.guest_workspace.rstrip('/')}/maco_generated/servers"
 
 
 def _result_payload(result: SandboxRunResult) -> dict[str, Any]:

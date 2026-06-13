@@ -82,8 +82,8 @@ def test_docker_provider_builds_guest_reachable_gateway_command(tmp_path, monkey
     assert "MACO_GATEWAY_TOKEN" in command
     assert "MACO_GATEWAY_TOKEN=secret-token" not in command
     assert captured["kwargs"]["env"]["MACO_GATEWAY_TOKEN"] == "secret-token"
-    assert f"{context.workspace}:/maco:ro" in command
     assert f"{context.scratch}:/workspace" in command
+    assert f"{context.workspace}:/workspace/.maco:ro" in command
     assert command[-4:] == ["maco-test:latest", "sh", "-lc", "echo hi"]
     assert captured["kwargs"]["timeout"] == 7
 

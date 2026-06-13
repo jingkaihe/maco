@@ -83,7 +83,7 @@ class SandboxProvider(Protocol):
         """Run a non-interactive command in the sandbox."""
 
     def python_script_command(self, guest_script_path: str, args: list[str]) -> str:
-        """Build the shell command used by code_executor for a guest script."""
+        """Build the shell command used by code_execute for a guest script."""
 
 
 def provider_from_name(

@@ -5,19 +5,69 @@ import json
 from pathlib import Path
 
 from maco.sandbox import GatewayInfo, SandboxContext, SandboxExec, SandboxRunResult
-from maco.serve_mcp import create_serve_mcp_app
+from maco.serve_mcp import _bash_description, _code_execute_description, _mcp_instructions, create_serve_mcp_app
 
 
-def test_serve_mcp_code_executor_uses_provider_script_command(tmp_path):
+def test_serve_mcp_code_execute_uses_provider_script_command(tmp_path):
     context = _context(tmp_path)
     provider = RecordingProvider()
     app = create_serve_mcp_app(provider, context)
 
-    result = app.call_tool("code_executor", {"code": "print('hello')", "filename": "task.py"})
+    result = app.call_tool("code_execute", {"code": "print('hello')", "filename": "task.py"})
     if hasattr(result, "__await__"):
         asyncio.run(result)
 
     assert provider.requests[0].command == "python /workspace/task.py"
+
+
+def test_serve_mcp_instructions_list_server_modules_and_portable_discovery(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    (context.workspace / "maco_generated" / "servers" / "echoServer").mkdir(parents=True)
+    (context.workspace / "maco_generated" / "servers" / "echoServer" / "__init__.py").write_text(
+        "from .echo import echo\n",
+        encoding="utf-8",
+    )
+
+    instructions = _mcp_instructions(provider, context)
+
+    assert "Available generated server modules:" in instructions
+    assert "- echoServer: /workspace/.maco/maco_generated/servers/echoServer" in instructions
+    assert "find /workspace/.maco/maco_generated/servers" in instructions
+    assert "grep -R \"^def \"" in instructions
+    assert "rg" not in instructions
+    assert "MACO_GATEWAY_URL" not in instructions
+    assert "PYTHONPATH" not in instructions
+
+
+def test_code_execute_description_lists_server_modules(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    (context.workspace / "maco_generated" / "servers" / "github").mkdir(parents=True)
+    (context.workspace / "maco_generated" / "servers" / "github" / "__init__.py").write_text(
+        "from .search import search\n",
+        encoding="utf-8",
+    )
+
+    description = _code_execute_description(provider, context)
+
+    assert "from maco_generated.servers.<server> import <tool>" in description
+    assert "- github: /workspace/.maco/maco_generated/servers/github" in description
+    assert "/workspace/.maco/maco_generated/servers/<server>/__init__.py" in description
+    assert "MACO_GATEWAY_URL" not in description
+    assert "PYTHONPATH" not in description
+
+
+def test_bash_description_uses_concrete_wrapper_paths_without_gateway_details(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+
+    description = _bash_description(provider, context)
+
+    assert "find /workspace/.maco/maco_generated/servers -maxdepth 2 -type f" in description
+    assert "grep -R \"^def \" /workspace/.maco/maco_generated/servers/<server>" in description
+    assert "MACO_GATEWAY_URL" not in description
+    assert "PYTHONPATH" not in description
 
 
 def _context(tmp_path: Path) -> SandboxContext:
@@ -36,7 +86,7 @@ def _context(tmp_path: Path) -> SandboxContext:
 
 
 class RecordingProvider:
-    guest_workspace = "/maco"
+    guest_workspace = "/workspace/.maco"
     guest_scratch = "/workspace"
 
     def __init__(self) -> None:

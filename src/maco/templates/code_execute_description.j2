@@ -1,0 +1,14 @@
+Run a Python script in the sandbox. Use this for multi-step MCP work, loops, filtering, joins, or structured output.
+
+Import generated tools with:
+  from maco_generated.servers.<server> import <tool>
+
+{% for line in server_catalog_lines -%}
+{{ line }}
+{% endfor %}
+
+Inspect wrapper code at:
+  {{ wrapper_root }}/<server>/__init__.py
+  {{ wrapper_root }}/<server>/<tool>.py
+
+Use the bash tool with find/grep for discovery before writing code when needed.

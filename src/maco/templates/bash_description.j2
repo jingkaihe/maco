@@ -1,0 +1,7 @@
+Run a non-interactive shell command in the sandbox.
+
+Use this to inspect generated wrapper files, search for available tool exports, or run small shell/Python probes before using code_execute.
+
+Useful discovery commands:
+  find {{ wrapper_root }} -maxdepth 2 -type f
+  grep -R "^def " {{ wrapper_root }}/<server>
