@@ -9,7 +9,7 @@ from urllib.request import urlopen
 
 
 def test_gen_serve_run_end_to_end(tmp_path):
-    repo = Path(__file__).resolve().parents[1]
+    repo = Path(__file__).resolve().parents[2]
     config_path = tmp_path / "mcp.json"
     workspace = tmp_path / ".maco"
     config_path.write_text(

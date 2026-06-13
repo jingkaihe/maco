@@ -284,6 +284,15 @@ wheels = [
 ]
 
 [[package]]
+name = "matchlock"
+version = "0.2.15"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/f0/5108e3d335df6102ac25e10194546ae5b8ac8bb8d2177139104b4d66526b/matchlock-0.2.15.tar.gz", hash = "sha256:320cd5007bdaf7a1ff4bfdc12a739f4da860a73810f8c654726d5884392a5d69", size = 35536, upload-time = "2026-06-13T23:11:23.44Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/ac/5ba4fc19078826fb19818b002b6a3c2fff59487d74209bc99a4f773e8576/matchlock-0.2.15-py3-none-any.whl", hash = "sha256:1e747fccc8ea428db0161fc2c14a58d27dc10add6e911584001c6d7f4037b5cf", size = 24238, upload-time = "2026-06-13T23:11:22.215Z" },
+]
+
+[[package]]
 name = "mcp"
 version = "1.27.1"
 source = { registry = "https://pypi.org/simple" }
@@ -313,6 +322,7 @@ name = "mcp-as-code"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "matchlock" },
     { name = "mcp" },
     { name = "pydantic" },
 ]
@@ -326,6 +336,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matchlock", specifier = "==0.2.15" },
     { name = "mcp", specifier = ">=1.24.0" },
     { name = "pydantic", specifier = ">=2.0" },
 ]

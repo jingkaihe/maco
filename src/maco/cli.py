@@ -9,6 +9,7 @@ from .codegen import generate
 from .config import ConfigError, load_config
 from .gateway import ServeOptions, serve
 from .runner import RunnerError, exit_with_error, run_code
+from .serve_mcp import ServeMcpOptions, serve_mcp
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -42,7 +43,54 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("script_args", nargs=argparse.REMAINDER, help="arguments passed to the Python file")
     run.set_defaults(func=_cmd_run)
 
+    serve_mcp = subparsers.add_parser(
+        "serve-mcp",
+        help="run an HTTP MCP server exposing sandboxed bash and code execution",
+    )
+    _add_serve_mcp_options(serve_mcp)
+    serve_mcp.set_defaults(func=_cmd_serve_mcp)
+
     return parser
+
+
+def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--provider",
+        choices=["local", "docker", "matchlock"],
+        default="local",
+        help="sandbox provider to use (default: local)",
+    )
+    command.add_argument("--workspace", default=".maco", help="generated workspace directory")
+    command.add_argument("--scratch", help="writable scratch directory for sandbox code")
+    command.add_argument("--gateway-file", help="gateway.json written by `maco serve`")
+    command.add_argument("--host", default="127.0.0.1", help="HTTP MCP bind host")
+    command.add_argument("--port", default=8789, type=int, help="HTTP MCP bind port")
+    command.add_argument("--timeout", default=60, type=int, help="default command timeout in seconds")
+    command.add_argument("--image", help="container image for docker/matchlock providers")
+    command.add_argument("--python-command", help="guest command prefix used by code_executor")
+    command.add_argument("--docker-binary", default="docker", help="docker binary path/name")
+    command.add_argument("--docker-network", help="docker network passed to `docker run --network`")
+    command.add_argument(
+        "--docker-gateway-host",
+        default="host.docker.internal",
+        help="hostname inside docker that reaches the host gateway",
+    )
+    command.add_argument("--matchlock-binary", default="matchlock", help="matchlock binary path/name")
+    command.add_argument(
+        "--matchlock-gateway-host",
+        default="maco-gateway.internal",
+        help="hostname inside matchlock that reaches the host gateway",
+    )
+    command.add_argument(
+        "--matchlock-gateway-ip",
+        help="optional IP for --add-host <gateway-host>:<ip> inside matchlock",
+    )
+    command.add_argument(
+        "--matchlock-allow-host",
+        action="append",
+        default=[],
+        help="extra host to allow from the matchlock sandbox (repeatable)",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -95,6 +143,30 @@ def _cmd_run(args: argparse.Namespace) -> int:
         cwd=args.cwd,
         python=args.python,
     )
+
+
+def _cmd_serve_mcp(args: argparse.Namespace) -> int:
+    serve_mcp(
+        ServeMcpOptions(
+            provider=args.provider,
+            workspace=args.workspace,
+            scratch=args.scratch,
+            gateway_file=args.gateway_file,
+            host=args.host,
+            port=args.port,
+            timeout=args.timeout,
+            image=args.image,
+            python_command=args.python_command,
+            docker_binary=args.docker_binary,
+            docker_network=args.docker_network,
+            docker_gateway_host=args.docker_gateway_host,
+            matchlock_binary=args.matchlock_binary,
+            matchlock_gateway_host=args.matchlock_gateway_host,
+            matchlock_gateway_ip=args.matchlock_gateway_ip,
+            matchlock_allow_host=tuple(args.matchlock_allow_host or []),
+        )
+    )
+    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

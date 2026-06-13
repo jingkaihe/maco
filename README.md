@@ -9,6 +9,7 @@ It follows Anthropic's [code-execution-with-MCP pattern](https://www.anthropic.c
 - `maco gen` generates typed Python wrappers from a Claude-style `mcp.json`.
 - `maco serve` runs a localhost gateway that owns the MCP sessions.
 - `maco run` executes your Python script with the generated wrappers on `PYTHONPATH`.
+- `maco serve-mcp` starts an experimental HTTP MCP server with sandboxed `bash` and `code_executor` tools.
 
 Use it when the task is easier as a small program than as a sequence of direct tool calls.
 
@@ -143,6 +144,31 @@ Stop it when done:
 ```bash
 tmux -L llm-agent kill-session -t maco-gateway
 ```
+
+## Experimental Sandboxed MCP server
+
+`maco serve-mcp` exposes a compact HTTP MCP server with two tools:
+
+- `bash(command, timeout?)` — run a non-interactive shell command in the configured sandbox.
+- `code_executor(code, filename?, args?, timeout?)` — write and run a Python script with generated wrappers on `PYTHONPATH`.
+
+The sandboxed MCP server assumes `maco gen` has created `.maco/` and `maco serve` is already running so `.maco/gateway.json` exists:
+
+```bash
+uv run maco gen --config mcp.json --workspace .maco --clean
+uv run maco serve --config mcp.json --workspace .maco
+uv run maco serve-mcp --workspace .maco --provider local --port 8789
+```
+
+Providers are selected with `--provider local|docker|matchlock`.
+
+- `local` runs commands as local subprocesses and uses the gateway URL from `.maco/gateway.json` directly.
+- `docker` rewrites loopback gateway URLs to `http://host.docker.internal:<port>/`, mounts `.maco` read-only at `/maco`, and mounts scratch at `/workspace`.
+- `matchlock` uses the Matchlock Python SDK, rewrites loopback gateway URLs to `http://maco-gateway.internal:<port>/`, mounts `.maco` read-only at `/maco`, mounts scratch at `/workspace`, allowlists the gateway host, and passes the gateway token through Matchlock secret placeholders instead of putting the real token in the VM environment.
+
+For Docker or Matchlock, bind the maco gateway to a host address reachable by the sandbox, not only `127.0.0.1`, or place a provider-managed proxy in front of it. Treat the gateway bearer token as a scoped capability; policy enforcement belongs at the gateway, not in generated wrappers.
+
+The sandbox providers live under `src/maco/sandbox/`, with concrete providers in `src/maco/sandbox/providers/`. Unit tests live under `tests/unit/`. Integration tests live under `tests/integration/`; they exercise the real echo MCP fixture through generated wrappers, the local gateway, and the sandboxed HTTP MCP server. Docker and Matchlock cases run when the host has the required runtime/gateway routing; otherwise those cases are skipped.
 
 ## Development
 
