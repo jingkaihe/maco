@@ -6,10 +6,10 @@ It follows Anthropic's [code-execution-with-MCP pattern](https://www.anthropic.c
 
 ## At a glance
 
-- `maco gen` generates typed Python wrappers from a Claude-style `mcp.json`.
-- `maco serve` runs a localhost gateway that owns the MCP sessions.
+- `maco gen` generates typed Python wrappers from a Claude-style `mcp.json` when you want wrapper-only discovery.
+- `maco serve` generates wrappers, then runs a localhost gateway that owns the MCP sessions.
 - `maco run` executes your Python script with the generated wrappers on `PYTHONPATH`.
-- `maco serve-mcp` starts an experimental HTTP MCP server with sandboxed `bash` and `code_execute` tools.
+- `maco serve-mcp` generates wrappers, starts a managed gateway, and exposes sandboxed `bash` and `code_execute` tools over HTTP MCP.
 
 Use it when the task is easier as a small program than as a sequence of direct tool calls.
 
@@ -31,23 +31,23 @@ Use it when the task is easier as a small program than as a sequence of direct t
 Claude-style mcp.json
         │
         ▼
-  maco gen ───────▶ .maco/maco_generated/servers/... typed Python wrappers
+  maco serve ─────▶ .maco/maco_generated/servers/... typed Python wrappers
         │
         ▼
-  maco serve ─────▶ local gateway on 127.0.0.1:<ephemeral-port>
+  local gateway on 127.0.0.1:<ephemeral-port>
         │
         ▼
   maco run script.py ── imports generated wrappers ── calls gateway ── calls MCP servers
 ```
 
-`maco serve` owns the MCP client sessions and writes connection details to `.maco/gateway.json`. `maco run` finds the generated workspace, sets `PYTHONPATH` and gateway environment variables, and runs your script with `uv run`.
+`maco serve` refreshes the generated workspace, owns the MCP client sessions, and writes connection details to `.maco/gateway.json`. `maco gen` is still available when you only want to generate or inspect wrappers without starting the gateway. `maco run` finds the generated workspace, sets `PYTHONPATH` and gateway environment variables, and runs your script with `uv run`.
 
 ## Quick start
 
 ```bash
-uv run maco gen --config mcp.json
-uv run maco serve --config mcp.json
-uv run maco run path/to/script.py
+uv run maco serve --config mcp.json --workspace .maco --clean
+# in another terminal, after the gateway has started:
+uv run maco run --workspace .maco path/to/script.py
 ```
 
 Generated code is written to a workspace (default: `.maco/`) with:
@@ -59,7 +59,7 @@ Generated code is written to a workspace (default: `.maco/`) with:
 
 See [`SKILL.md`](SKILL.md) for an agent-facing workflow.
 
-If you are using the source checkout directly, the `scripts/` wrappers mirror the CLI subcommands: `./scripts/maco-gen`, `./scripts/maco-serve`, and `./scripts/maco-run`.
+If you are using the source checkout directly, the `scripts/` wrappers mirror the CLI subcommands: `./scripts/maco-gen`, `./scripts/maco-serve`, `./scripts/maco-run`, and `./scripts/maco-serve-mcp`.
 
 ## MCP config
 
@@ -96,7 +96,7 @@ Supported transports are `stdio`, `http`/`streamable_http`, and `sse`. Only Clau
 
 ## Generated code
 
-After `maco gen`, discover generated wrappers progressively:
+After `maco gen` or once `maco serve` has started, discover generated wrappers progressively:
 
 ```bash
 rg --files .maco/maco_generated/servers
@@ -131,12 +131,12 @@ For JSON keys that are not valid Python identifiers, use the generated Python fi
 
 ## Running the gateway
 
-The default gateway bind address is `127.0.0.1:0`, so the operating system chooses an ephemeral localhost port. By default, `maco serve` writes a random bearer token and gateway URL to `.maco/gateway.json`.
+The default gateway bind address is `127.0.0.1:0`, so the operating system chooses an ephemeral localhost port. By default, `maco serve` generates wrappers, writes a random bearer token and gateway URL to `.maco/gateway.json`, and keeps the gateway running until interrupted. Pass `--clean` to recreate the generated workspace before starting.
 
 For agent workflows, run the gateway in a persistent session while iterating on scripts:
 
 ```bash
-tmux -L llm-agent new-session -d -s maco-gateway 'uv run maco serve --config mcp.json --workspace .maco 2>&1'
+tmux -L llm-agent new-session -d -s maco-gateway 'uv run maco serve --config mcp.json --workspace .maco --clean 2>&1'
 tmux -L llm-agent capture-pane -t maco-gateway -p -S -50
 uv run maco run --workspace .maco ./analysis.py
 ```
@@ -156,12 +156,10 @@ tmux -L llm-agent kill-session -t maco-gateway
 
 The server advertises generated server modules with their sandbox paths. Docker and Matchlock use `/workspace/.maco/maco_generated/servers/<server>` for wrapper code and `/workspace` for writable files. The default sandbox image is `ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine`, which includes `uv`, Python 3.12, `pydantic`, `rg`, and `fd`; use those through `bash` to inspect wrapper exports before writing `code_execute` scripts.
 
-The sandboxed MCP server assumes `maco gen` has created `.maco/` and `maco serve` is already running so `.maco/gateway.json` exists:
+The sandboxed MCP server is the one-command MCP-mode entrypoint: it generates wrappers, starts a managed maco gateway in the background, then serves HTTP MCP:
 
 ```bash
-uv run maco gen --config mcp.json --workspace .maco --clean
-uv run maco serve --config mcp.json --workspace .maco
-uv run maco serve-mcp --workspace .maco --provider local --port 8789
+uv run maco serve-mcp --config mcp.json --workspace .maco --clean --provider local --port 8789
 ```
 
 Providers are selected with `--provider local|docker|matchlock`.
@@ -169,6 +167,8 @@ Providers are selected with `--provider local|docker|matchlock`.
 - `local` runs commands as local subprocesses and uses the gateway URL from `.maco/gateway.json` directly.
 - `docker` rewrites loopback gateway URLs to `http://host.docker.internal:<port>/`, mounts `.maco` read-only at `/workspace/.maco`, and mounts scratch at `/workspace`.
 - `matchlock` uses the Matchlock Python SDK, rewrites loopback gateway URLs to `http://maco-gateway.internal:<port>/`, mounts `.maco` read-only at `/workspace/.maco`, mounts scratch at `/workspace`, allowlists the gateway host, and passes the gateway token through Matchlock secret placeholders instead of putting the real token in the VM environment.
+
+When `serve-mcp` manages the gateway itself, it binds the gateway to `127.0.0.1` for the local provider and `0.0.0.0` for Docker/Matchlock so the sandbox can reach it through the provider-specific host alias. If you already run a separate `maco serve`, pass `--gateway-file path/to/gateway.json` to use that gateway instead.
 
 The default Docker/Matchlock sandbox image is built from `images/sandbox/Dockerfile`:
 
@@ -178,12 +178,11 @@ docker save ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine \
   | matchlock image import ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine
 ```
 
-For Docker or Matchlock, bind the maco gateway to a host address reachable by the sandbox, not only `127.0.0.1`, or place a provider-managed proxy in front of it. Treat the gateway bearer token as a scoped capability; policy enforcement belongs at the gateway, not in generated wrappers.
+Treat the gateway bearer token as a scoped capability; policy enforcement belongs at the gateway, not in generated wrappers.
 
 The sandbox providers live under `src/maco/sandbox/`, with concrete providers in `src/maco/sandbox/providers/`. Unit tests live under `tests/unit/`. Integration tests live under `tests/integration/`; they exercise the real echo MCP fixture through generated wrappers, the local gateway, and the sandboxed HTTP MCP server. Docker and Matchlock cases run when the host has the required runtime/gateway routing; otherwise those cases are skipped.
 
-See [`examples/serve-mcp`](examples/serve-mcp) for a complete MCP-mode example
-that wraps Playwright MCP and GitHub MCP behind one `maco serve-mcp` endpoint.
+See [`examples/serve-mcp`](examples/serve-mcp) for a complete MCP-mode example that wraps Playwright MCP and GitHub MCP behind one `maco serve-mcp` endpoint.
 
 ## Development
 

@@ -11,7 +11,6 @@ import socket
 import subprocess
 import time
 from typing import Any
-from urllib.request import urlopen
 
 import httpx
 import pytest
@@ -23,11 +22,10 @@ from mcp.client.streamable_http import streamable_http_client
 
 def test_serve_mcp_local_tools_call_real_backend_with_generated_wrappers(tmp_path):
     repo = _repo_root()
-    config_path, workspace = _generate_echo_workspace(repo, tmp_path)
+    config_path, workspace = _write_echo_config(repo, tmp_path)
 
-    with _maco_gateway(repo, config_path, workspace, host="127.0.0.1"):
-        with _serve_mcp(repo, workspace, tmp_path, provider="local") as mcp_url:
-            payloads = asyncio.run(_call_wrapper_tool_values(mcp_url))
+    with _serve_mcp(repo, config_path, workspace, tmp_path, provider="local") as mcp_url:
+        payloads = asyncio.run(_call_wrapper_tool_values(mcp_url))
 
     bash_payload = payloads["bash"]
     code_payload = payloads["code_execute"]
@@ -39,20 +37,19 @@ def test_serve_mcp_local_tools_call_real_backend_with_generated_wrappers(tmp_pat
 
 def test_serve_mcp_local_bash_returns_exit_status_stdout_and_stderr(tmp_path):
     repo = _repo_root()
-    config_path, workspace = _generate_echo_workspace(repo, tmp_path)
+    config_path, workspace = _write_echo_config(repo, tmp_path)
 
-    with _maco_gateway(repo, config_path, workspace, host="127.0.0.1"):
-        with _serve_mcp(repo, workspace, tmp_path, provider="local") as mcp_url:
-            payload = asyncio.run(
-                _call_tool_payload(
-                    mcp_url,
-                    "bash",
-                    {
-                        "command": "printf 'stdout-value\\n'; printf 'stderr-value\\n' >&2; exit 7",
-                        "timeout": 30,
-                    },
-                )
+    with _serve_mcp(repo, config_path, workspace, tmp_path, provider="local") as mcp_url:
+        payload = asyncio.run(
+            _call_tool_payload(
+                mcp_url,
+                "bash",
+                {
+                    "command": "printf 'stdout-value\\n'; printf 'stderr-value\\n' >&2; exit 7",
+                    "timeout": 30,
+                },
             )
+        )
 
     assert payload["ok"] is False
     assert payload["exit_code"] == 7
@@ -64,23 +61,21 @@ def test_serve_mcp_local_bash_returns_exit_status_stdout_and_stderr(tmp_path):
 def test_serve_mcp_providers_call_real_backend_with_generated_client(tmp_path, provider):
     _require_provider(provider)
     repo = _repo_root()
-    config_path, workspace = _generate_echo_workspace(repo, tmp_path)
-    gateway_host = "0.0.0.0" if provider in {"docker", "matchlock"} else "127.0.0.1"
-
-    with _maco_gateway(repo, config_path, workspace, host=gateway_host):
-        with _serve_mcp(
-            repo,
-            workspace,
-            tmp_path,
-            provider=provider,
-            extra_args=_provider_args(provider),
-        ) as mcp_url:
-            try:
-                payloads = asyncio.run(_call_generated_client_tool_values(mcp_url, provider))
-            except Exception as exc:  # pragma: no cover - Matchlock host/runtime dependent
-                if provider == "matchlock":
-                    pytest.skip(f"matchlock serve-mcp integration unavailable on this host: {exc}")
-                raise
+    config_path, workspace = _write_echo_config(repo, tmp_path)
+    with _serve_mcp(
+        repo,
+        config_path,
+        workspace,
+        tmp_path,
+        provider=provider,
+        extra_args=_provider_args(provider),
+    ) as mcp_url:
+        try:
+            payloads = asyncio.run(_call_generated_client_tool_values(mcp_url, provider))
+        except Exception as exc:  # pragma: no cover - Matchlock host/runtime dependent
+            if provider == "matchlock":
+                pytest.skip(f"matchlock serve-mcp integration unavailable on this host: {exc}")
+            raise
 
     for payload in payloads.values():
         _assert_successful_command(payload)
@@ -227,7 +222,7 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
-def _generate_echo_workspace(repo: Path, tmp_path: Path) -> tuple[Path, Path]:
+def _write_echo_config(repo: Path, tmp_path: Path) -> tuple[Path, Path]:
     config_path = tmp_path / "mcp.json"
     workspace = tmp_path / ".maco"
     config_path.write_text(
@@ -249,62 +244,13 @@ def _generate_echo_workspace(repo: Path, tmp_path: Path) -> tuple[Path, Path]:
         ),
         encoding="utf-8",
     )
-    completed = subprocess.run(
-        [
-            "uv",
-            "run",
-            "--project",
-            str(repo),
-            "maco",
-            "gen",
-            "--config",
-            str(config_path),
-            "--workspace",
-            str(workspace),
-            "--clean",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=60,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
     return config_path, workspace
-
-
-@contextlib.contextmanager
-def _maco_gateway(repo: Path, config_path: Path, workspace: Path, *, host: str) -> Iterator[None]:
-    process = subprocess.Popen(
-        [
-            "uv",
-            "run",
-            "--project",
-            str(repo),
-            "maco",
-            "serve",
-            "--config",
-            str(config_path),
-            "--workspace",
-            str(workspace),
-            "--host",
-            host,
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        env=_process_env(),
-    )
-    try:
-        _wait_for_gateway(process, workspace / "gateway.json")
-        yield
-    finally:
-        _terminate(process)
 
 
 @contextlib.contextmanager
 def _serve_mcp(
     repo: Path,
+    config_path: Path,
     workspace: Path,
     tmp_path: Path,
     *,
@@ -320,8 +266,11 @@ def _serve_mcp(
         str(repo),
         "maco",
         "serve-mcp",
+        "--config",
+        str(config_path),
         "--workspace",
         str(workspace),
+        "--clean",
         "--scratch",
         str(scratch),
         "--provider",
@@ -347,23 +296,6 @@ def _serve_mcp(
         yield mcp_url
     finally:
         _terminate(process)
-
-
-def _wait_for_gateway(process: subprocess.Popen[str], gateway_file: Path) -> None:
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise AssertionError(f"maco serve exited early:\n{_read_process_output(process)}")
-        if gateway_file.exists():
-            gateway = json.loads(gateway_file.read_text(encoding="utf-8"))
-            try:
-                with urlopen(gateway["url"] + "health", timeout=1) as response:
-                    if response.status == 200:
-                        return
-            except Exception:
-                pass
-        time.sleep(0.1)
-    raise AssertionError(f"maco serve did not become healthy:\n{_read_process_output(process)}")
 
 
 async def _wait_for_mcp_server(process: subprocess.Popen[str], mcp_url: str) -> None:

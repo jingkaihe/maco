@@ -11,6 +11,9 @@ from jinja2 import Environment, PackageLoader, StrictUndefined
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
+from .codegen import generate
+from .config import load_config
+from .gateway import GatewayServer, ServeOptions
 from .sandbox import (
     GatewayInfo,
     SandboxContext,
@@ -35,10 +38,16 @@ _TEMPLATES = Environment(
 class ServeMcpOptions:
     """Configuration for the sandbox-backed MCP server."""
 
+    config: str | Path = "mcp.json"
     provider: str = "local"
     workspace: str | Path = ".maco"
+    clean: bool = False
     scratch: str | Path | None = None
     gateway_file: str | Path | None = None
+    gateway_host: str | None = None
+    gateway_port: int = 0
+    gateway_token: str | None = None
+    gateway_use_token: bool = True
     host: str = "127.0.0.1"
     port: int = 8789
     timeout: int = 60
@@ -56,17 +65,38 @@ class ServeMcpOptions:
 def serve_mcp(options: ServeMcpOptions) -> None:
     """Run a streamable HTTP MCP server exposing sandboxed bash/code tools."""
 
+    config = load_config(options.config)
     workspace = Path(options.workspace).expanduser().resolve()
+    stats = generate(config, workspace=workspace, clean=options.clean)
+    print(f"Generated {stats.tool_count} tools from {stats.server_count} servers")
+    print(f"Workspace: {workspace}")
     scratch = (
         Path(options.scratch).expanduser().resolve()
         if options.scratch is not None
         else workspace.parent / "maco-serve-mcp"
     )
+    gateway_server: GatewayServer | None = None
     gateway_file = (
         Path(options.gateway_file).expanduser().resolve()
         if options.gateway_file is not None
         else workspace / "gateway.json"
     )
+    if options.gateway_file is None:
+        gateway_host = options.gateway_host or _default_gateway_host(options.provider)
+        gateway_server = GatewayServer(
+            config,
+            ServeOptions(
+                host=gateway_host,
+                port=options.gateway_port,
+                workspace=workspace,
+                token=options.gateway_token,
+                use_token=options.gateway_use_token,
+            ),
+        ).start()
+        gateway_file = gateway_server.gateway_file
+        print("maco gateway started")
+        print(f"  URL: {gateway_server.url}")
+        print(f"  gateway file: {gateway_file}")
     context = SandboxContext(
         workspace=workspace,
         scratch=scratch,
@@ -92,7 +122,11 @@ def serve_mcp(options: ServeMcpOptions) -> None:
     print(f"  provider: {options.provider}")
     print(f"  workspace: {workspace}")
     print(f"  scratch: {scratch}")
-    app.run("streamable-http")
+    try:
+        app.run("streamable-http")
+    finally:
+        if gateway_server is not None:
+            gateway_server.stop()
 
 
 def create_serve_mcp_app(
@@ -214,6 +248,10 @@ def _guest_server_root(provider: SandboxProvider) -> str:
 def _content_addressed_script_filename(code: str) -> str:
     digest = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
     return f"{digest}.py"
+
+
+def _default_gateway_host(provider: str) -> str:
+    return "0.0.0.0" if provider.replace("_", "-").lower() in {"docker", "matchlock"} else "127.0.0.1"
 
 
 def _result_payload(result: SandboxRunResult) -> dict[str, Any]:

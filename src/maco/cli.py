@@ -30,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     serve_parser = subparsers.add_parser("serve", help="run the local maco gateway server")
     serve_parser.add_argument("--config", default="mcp.json", help="MCP config path (default: mcp.json)")
     serve_parser.add_argument("--workspace", default=".maco", help="generated workspace directory (default: .maco)")
+    serve_parser.add_argument("--clean", action="store_true", help="remove the workspace before generating")
     serve_parser.add_argument("--host", default="127.0.0.1", help="host to bind (default: 127.0.0.1)")
     serve_parser.add_argument("--port", default=0, type=int, help="port to bind (default: 0, an ephemeral port)")
     serve_parser.add_argument("--token", help="explicit bearer token for generated code")
@@ -55,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--config", default="mcp.json", help="MCP config path (default: mcp.json)")
     command.add_argument(
         "--provider",
         choices=["local", "docker", "matchlock"],
@@ -62,8 +64,28 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
         help="sandbox provider to use (default: local)",
     )
     command.add_argument("--workspace", default=".maco", help="generated workspace directory")
+    command.add_argument("--clean", action="store_true", help="remove the workspace before generating")
     command.add_argument("--scratch", help="writable scratch directory for sandbox code")
-    command.add_argument("--gateway-file", help="gateway.json written by `maco serve`")
+    command.add_argument(
+        "--gateway-file",
+        help="connect to an existing gateway.json instead of starting a managed gateway",
+    )
+    command.add_argument(
+        "--gateway-host",
+        help="host for the managed gateway started by serve-mcp (default: 127.0.0.1, or 0.0.0.0 for docker/matchlock)",
+    )
+    command.add_argument(
+        "--gateway-port",
+        default=0,
+        type=int,
+        help="port for the managed gateway started by serve-mcp (default: 0)",
+    )
+    command.add_argument("--gateway-token", help="explicit bearer token for the managed gateway")
+    command.add_argument(
+        "--no-gateway-token",
+        action="store_true",
+        help="disable bearer-token protection for the managed gateway",
+    )
     command.add_argument("--host", default="127.0.0.1", help="HTTP MCP bind host")
     command.add_argument("--port", default=8789, type=int, help="HTTP MCP bind port")
     command.add_argument("--timeout", default=60, type=int, help="default command timeout in seconds")
@@ -123,6 +145,9 @@ def _cmd_gen(args: argparse.Namespace) -> int:
 
 def _cmd_serve(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    stats = generate(config, workspace=args.workspace, clean=args.clean)
+    print(f"Generated {stats.tool_count} tools from {stats.server_count} servers")
+    print(f"Workspace: {stats.workspace}")
     serve(
         config,
         ServeOptions(
@@ -152,10 +177,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
 def _cmd_serve_mcp(args: argparse.Namespace) -> int:
     serve_mcp(
         ServeMcpOptions(
+            config=args.config,
             provider=args.provider,
             workspace=args.workspace,
+            clean=args.clean,
             scratch=args.scratch,
             gateway_file=args.gateway_file,
+            gateway_host=args.gateway_host,
+            gateway_port=args.gateway_port,
+            gateway_token=args.gateway_token,
+            gateway_use_token=not args.no_gateway_token,
             host=args.host,
             port=args.port,
             timeout=args.timeout,

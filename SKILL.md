@@ -29,10 +29,11 @@ Generated tool functions call a local gateway process. The gateway owns the MCP 
 Use the script wrappers from this repository/skill directory:
 
 ```bash
-./scripts/maco-gen --config mcp.json --workspace .maco --clean
-./scripts/maco-serve --config mcp.json --workspace .maco
+./scripts/maco-serve --config mcp.json --workspace .maco --clean
 ./scripts/maco-run --workspace .maco path/to/code.py
 ```
+
+`maco serve` refreshes the generated wrappers before starting the gateway. Use `maco gen` directly only when you want wrapper-only discovery without starting a gateway.
 
 If installed as a Python package, use the same subcommands through `uv run maco ...`.
 
@@ -96,13 +97,13 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
 
 ## Recommended agent workflow
 
-1. Generate interfaces:
+1. Generate interfaces, or let `maco serve` do it:
 
    ```bash
    ./scripts/maco-gen --clean
    ```
 
-   The command prints the generated workspace and a suggested `rg --files ...` command. Treat that as the starting point for discovery.
+   This is optional if you are about to run `./scripts/maco-serve --clean`; both commands print the generated workspace. Treat that as the starting point for discovery.
 
 2. Discover available wrappers progressively. List generated modules first, then inspect only the server `__init__.py` and specific tool wrappers needed for the task. Avoid reading `.maco/manifest.json` by default because it can pull every tool/schema into context at once.
 
@@ -114,10 +115,10 @@ Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
 
    Use `rg --files ... | rg '<keyword>'` when you have a likely tool name, for example `rg --files .maco/maco_generated/servers | rg 'screenshot|navigate'`. `manifest.json` is only for broad audits or automation that needs the full generated index.
 
-3. Start the gateway in tmux so it stays alive:
+3. Start the gateway in tmux so it stays alive. This also refreshes generated wrappers:
 
    ```bash
-   tmux -L llm-agent new-session -d -s maco-gateway './scripts/maco-serve 2>&1'
+   tmux -L llm-agent new-session -d -s maco-gateway './scripts/maco-serve --clean 2>&1'
    tmux -L llm-agent capture-pane -t maco-gateway -p -S -50
    ```
 

@@ -64,46 +64,76 @@ class ManagerLoop:
         self.loop.run_forever()
 
 
+class GatewayServer:
+    """Managed maco gateway suitable for embedding or blocking CLI use."""
+
+    def __init__(self, config: MacoConfig, options: ServeOptions) -> None:
+        self.config = config
+        self.options = options
+        self.workspace = Path(options.workspace).expanduser().resolve()
+        self.gateway_file = self.workspace / "gateway.json"
+        self.token = options.token if options.use_token else None
+        if options.use_token and not self.token:
+            self.token = secrets.token_urlsafe(32)
+        self.manager_loop = ManagerLoop(config)
+        self.httpd: ThreadingHTTPServer | None = None
+        self.thread: threading.Thread | None = None
+        self.url = ""
+
+    def start(self) -> GatewayServer:
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        self.manager_loop.start()
+        try:
+            handler_cls = _make_handler(self.manager_loop, self.token)
+            self.httpd = ThreadingHTTPServer((self.options.host, self.options.port), handler_cls)
+            actual_host, actual_port = self.httpd.server_address[:2]
+            display_host = "127.0.0.1" if actual_host in {"0.0.0.0", ""} else actual_host
+            self.url = f"http://{display_host}:{actual_port}/"
+            self.thread = threading.Thread(target=self.httpd.serve_forever, name="maco-gateway", daemon=True)
+            self.thread.start()
+            _write_gateway_file(self.gateway_file, self.url, self.token, self.config.path)
+        except Exception:
+            if self.httpd is not None:
+                if self.thread is not None and self.thread.is_alive():
+                    self.httpd.shutdown()
+                    self.thread.join(timeout=10)
+                self.httpd.server_close()
+            self.manager_loop.stop()
+            raise
+        return self
+
+    def stop(self) -> None:
+        if self.httpd is not None:
+            self.httpd.shutdown()
+            self.httpd.server_close()
+        if self.thread is not None:
+            self.thread.join(timeout=10)
+        self.manager_loop.stop()
+
+
 def serve(config: MacoConfig, options: ServeOptions) -> None:
     """Run the gateway until interrupted."""
 
-    workspace = Path(options.workspace).expanduser().resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
-    token = options.token if options.use_token else None
-    if options.use_token and not token:
-        token = secrets.token_urlsafe(32)
-
-    manager_loop = ManagerLoop(config)
-    manager_loop.start()
-
-    handler_cls = _make_handler(manager_loop, token)
-    httpd = ThreadingHTTPServer((options.host, options.port), handler_cls)
-    actual_host, actual_port = httpd.server_address[:2]
-    display_host = "127.0.0.1" if actual_host in {"0.0.0.0", ""} else actual_host
-    url = f"http://{display_host}:{actual_port}/"
-    _write_gateway_file(workspace / "gateway.json", url, token, config.path)
-
+    gateway = GatewayServer(config, options).start()
     stop_event = threading.Event()
 
     def _request_shutdown(signum: int, _frame: Any) -> None:
         print(f"\nreceived signal {signum}; stopping maco gateway", file=sys.stderr)
         stop_event.set()
-        threading.Thread(target=httpd.shutdown, daemon=True).start()
 
     old_sigint = signal.signal(signal.SIGINT, _request_shutdown)
     old_sigterm = signal.signal(signal.SIGTERM, _request_shutdown)
     try:
         print("maco gateway started")
-        print(f"  URL: {url}")
-        print(f"  workspace: {workspace}")
-        print(f"  gateway file: {workspace / 'gateway.json'}")
+        print(f"  URL: {gateway.url}")
+        print(f"  workspace: {gateway.workspace}")
+        print(f"  gateway file: {gateway.gateway_file}")
         print("  press Ctrl+C to stop")
-        httpd.serve_forever()
+        stop_event.wait()
     finally:
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)
-        httpd.server_close()
-        manager_loop.stop()
+        gateway.stop()
         if stop_event.is_set():
             print("maco gateway stopped")
 

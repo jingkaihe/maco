@@ -174,7 +174,7 @@ def normalize_context(context: SandboxContext) -> SandboxContext:
     scratch = context.scratch.expanduser().resolve()
     if not (workspace / "maco_generated" / "client.py").exists():
         raise SandboxError(
-            f"{workspace} does not look like a generated maco workspace; run `maco gen` first"
+            f"{workspace} does not look like a generated maco workspace; run `maco gen` or `maco serve` first"
         )
     scratch.mkdir(parents=True, exist_ok=True)
     return SandboxContext(
