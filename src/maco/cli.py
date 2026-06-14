@@ -12,6 +12,7 @@ from .gateway import ServeOptions, serve
 from .runner import RunnerError, exit_with_error, run_code
 from .sandbox import DEFAULT_SANDBOX_IMAGE, SANDBOX_SDK_ROOT
 from .serve_mcp import ServeMcpOptions, serve_mcp
+from .version import get_version_info
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,6 +21,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Generate and execute Python code interfaces for MCP tools.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    version_parser = subparsers.add_parser("version", help="print maco version and release metadata")
+    version_parser.set_defaults(func=_cmd_version)
 
     gen = subparsers.add_parser("gen", help="generate Python wrappers for configured MCP tools")
     gen.add_argument("--config", default="mcp.json", help="MCP config path (default: mcp.json)")
@@ -141,6 +145,14 @@ def main(argv: list[str] | None = None) -> int:
         return args.func(args)
     except (ConfigError, RunnerError, OSError, ValueError) as exc:
         exit_with_error(exc)
+    return 0
+
+
+def _cmd_version(args: argparse.Namespace) -> int:
+    info = get_version_info()
+    print(f"version: {info.version}")
+    print(f"commit: {info.commit_sha}")
+    print(f"release date: {info.release_date}")
     return 0
 
 

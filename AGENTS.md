@@ -9,14 +9,15 @@ make check
 make test-unit
 make test-integration
 make build
+make build-release
 make image
 make image-import
 uv run maco --help
 ```
 
-`make check` runs `ruff`, `ty`, and the full pytest suite. Use `make test-unit` for fast unit coverage and `make test-integration` for end-to-end tests that may start real MCP/gateway/sandbox processes. Use `python -m compileall` only as a targeted smoke test for generated code or unusual dynamic-code changes.
+`make check` runs `ruff`, `ty`, and the full pytest suite. Use `make test-unit` for fast unit coverage and `make test-integration` for end-to-end tests that may start real MCP/gateway/sandbox processes. Use `make build-release` only when you intentionally want to embed the current commit/date into local build artifacts; it resets `src/maco/_build_info.py` afterwards. Use `python -m compileall` only as a targeted smoke test for generated code or unusual dynamic-code changes.
 
-`VERSION.txt` is the single version source for the Python package and sandbox image tag. Python builds use Hatchling dynamic versioning from `VERSION.txt`; Docker image tags use `ghcr.io/<owner>/maco:<VERSION>-alpine`. Tag releases must use `v<VERSION>` and are handled by `.github/workflows/release.yml`, which publishes the Python package through PyPI trusted publishing/OIDC and pushes the GHCR image.
+`VERSION.txt` is the single version source for the Python package and sandbox image tag. Python builds use Hatchling dynamic versioning from `VERSION.txt`; Docker image tags use `ghcr.io/<owner>/maco:<VERSION>-alpine`. Release builds call `scripts/write-build-info` before `uv build` so `maco version` reports the package version, commit SHA, and release date. Tag releases must use `v<VERSION>` and are handled by `.github/workflows/release.yml`, which publishes the Python package through PyPI trusted publishing/OIDC and pushes the GHCR image.
 
 Script wrappers mirror the CLI subcommands for skill/drop-in usage:
 
