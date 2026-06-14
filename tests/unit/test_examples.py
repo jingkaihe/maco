@@ -20,8 +20,8 @@ def test_serve_mcp_example_configs_are_valid_json():
 def test_serve_mcp_example_readme_mentions_configs_and_servers():
     readme = Path("examples/serve-mcp/README.md").read_text(encoding="utf-8")
 
-    assert "examples/serve-mcp/mcp.json" in readme
-    assert "examples/serve-mcp/mcp-client.json" in readme
+    assert "`mcp.json`" in readme
+    assert "`mcp-client.json`" in readme
     assert "@playwright/mcp@latest" in readme
     assert "ghcr.io/github/github-mcp-server" in readme
     assert "gh auth token" in readme

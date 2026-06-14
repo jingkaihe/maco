@@ -4,14 +4,21 @@ import asyncio
 import json
 from pathlib import Path
 import re
+import subprocess
+
+import pytest
 
 from maco.sandbox import GatewayInfo, SandboxContext, SandboxExec, SandboxRunResult
+import maco.serve_mcp as serve_mcp_module
 from maco.serve_mcp import (
     _bash_description,
     _code_execute_description,
     _content_addressed_script_filename,
     _default_gateway_host,
+    _detect_docker_gateway_ip,
+    _docker_gateway_ip,
     _gateway_extra_hosts,
+    _is_docker_desktop,
     _matchlock_gateway_ip,
     _mcp_instructions,
     create_serve_mcp_app,
@@ -131,11 +138,16 @@ def test_bash_description_uses_concrete_wrapper_paths_without_gateway_details(tm
 
 
 def test_matchlock_managed_gateway_defaults_to_local_bind_plus_gateway_extra_host(tmp_path):
-    assert _default_gateway_host("matchlock") == "127.0.0.1"
+    assert _default_gateway_host() == "127.0.0.1"
     gateway_ip = _matchlock_gateway_ip(None, managed_gateway=True, gateway_file=tmp_path / "missing.json")
 
     assert gateway_ip == "192.168.100.1"
-    assert _gateway_extra_hosts("matchlock", gateway_ip, None) == ("192.168.100.1",)
+    assert _gateway_extra_hosts(
+        "matchlock",
+        docker_gateway_ip=None,
+        matchlock_gateway_ip=gateway_ip,
+        explicit_gateway_host=None,
+    ) == ("192.168.100.1",)
 
 
 def test_matchlock_external_local_gateway_file_does_not_guess_gateway_ip(tmp_path):
@@ -145,8 +157,100 @@ def test_matchlock_external_local_gateway_file_does_not_guess_gateway_ip(tmp_pat
     assert _matchlock_gateway_ip(None, managed_gateway=False, gateway_file=gateway_file) is None
 
 
-def test_docker_managed_gateway_still_binds_wildcard_by_default():
-    assert _default_gateway_host("docker") == "0.0.0.0"
+def test_docker_managed_gateway_defaults_to_local_bind_plus_bridge_extra_host(monkeypatch):
+    monkeypatch.setattr(serve_mcp_module, "_is_docker_desktop", lambda _binary: False)
+    monkeypatch.setattr(serve_mcp_module, "_detect_docker_gateway_ip", lambda _binary, _network: "172.18.0.1")
+
+    gateway_ip = _docker_gateway_ip(
+        None,
+        managed_gateway=True,
+        docker_binary="docker-test",
+        docker_network="test-network",
+    )
+
+    assert _default_gateway_host() == "127.0.0.1"
+    assert gateway_ip == "172.18.0.1"
+    assert _gateway_extra_hosts(
+        "docker",
+        docker_gateway_ip=gateway_ip,
+        matchlock_gateway_ip=None,
+        explicit_gateway_host=None,
+    ) == ("172.18.0.1",)
+
+
+def test_docker_managed_gateway_preserves_docker_desktop_alias(monkeypatch):
+    monkeypatch.setattr(serve_mcp_module, "_is_docker_desktop", lambda _binary: True)
+    monkeypatch.setattr(
+        serve_mcp_module,
+        "_detect_docker_gateway_ip",
+        lambda _binary, _network: pytest.fail("should not inspect docker networks on Docker Desktop"),
+    )
+
+    gateway_ip = _docker_gateway_ip(
+        None,
+        managed_gateway=True,
+        docker_binary="docker-test",
+        docker_network=None,
+    )
+
+    assert gateway_ip is None
+    assert _gateway_extra_hosts(
+        "docker",
+        docker_gateway_ip=gateway_ip,
+        matchlock_gateway_ip=None,
+        explicit_gateway_host=None,
+    ) == ()
+
+
+def test_docker_managed_gateway_requires_detected_native_linux_gateway(monkeypatch):
+    monkeypatch.setattr(serve_mcp_module, "_is_docker_desktop", lambda _binary: False)
+    monkeypatch.setattr(serve_mcp_module, "_detect_docker_gateway_ip", lambda _binary, _network: None)
+
+    with pytest.raises(ValueError, match="pass --docker-gateway-ip"):
+        _docker_gateway_ip(
+            None,
+            managed_gateway=True,
+            docker_binary="docker-test",
+            docker_network="custom-net",
+        )
+
+
+def test_docker_external_gateway_file_does_not_guess_gateway_ip():
+    assert (
+        _docker_gateway_ip(
+            None,
+            managed_gateway=False,
+            docker_binary="docker-test",
+            docker_network=None,
+        )
+        is None
+    )
+
+
+def test_is_docker_desktop_uses_docker_operating_system(monkeypatch):
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command == ["docker-test", "info", "--format", "{{.OperatingSystem}}"]
+        return subprocess.CompletedProcess(command, 0, stdout="Docker Desktop\n", stderr="")
+
+    monkeypatch.setattr(serve_mcp_module.sys, "platform", "linux")
+    monkeypatch.setattr(serve_mcp_module.subprocess, "run", fake_run)
+
+    assert _is_docker_desktop("docker-test") is True
+
+
+def test_detect_docker_gateway_ip_reads_network_gateway(monkeypatch):
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command == ["docker-test", "network", "inspect", "custom-net"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps([{"IPAM": {"Config": [{"Gateway": "172.19.0.1"}]}}]),
+            stderr="",
+        )
+
+    monkeypatch.setattr(serve_mcp_module.subprocess, "run", fake_run)
+
+    assert _detect_docker_gateway_ip("docker-test", "custom-net") == "172.19.0.1"
 
 
 def _context(tmp_path: Path) -> SandboxContext:

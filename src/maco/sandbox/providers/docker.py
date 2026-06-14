@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+from urllib.parse import urlsplit, urlunsplit
 
 from ..core import SANDBOX_SDK_ROOT, SandboxContext, SandboxError, SandboxExec, SandboxRunResult, translate_loopback_url
 from .base import RemoteSandboxProvider
@@ -21,24 +22,31 @@ class DockerSandboxProvider(RemoteSandboxProvider):
         docker_binary: str = "docker",
         network: str | None = None,
         gateway_host: str = "host.docker.internal",
+        gateway_ip: str | None = None,
     ) -> None:
         super().__init__(context)
         self.image = image
         self.docker_binary = docker_binary
         self.network = network
         self.gateway_host = gateway_host
+        self.gateway_ip = gateway_ip
         self.container_id: str | None = None
 
     def start(self) -> None:
         if self.container_id is not None:
             return
-        gateway_url = translate_loopback_url(self.context.gateway.url, self.gateway_host)
+        gateway_url = _docker_gateway_url(
+            self.context.gateway.url,
+            gateway_host=self.gateway_host,
+            gateway_ip=self.gateway_ip,
+        )
         env = self._guest_env({}, gateway_url=gateway_url)
         host_env = os.environ.copy()
         command = [self.docker_binary, "run", "-d", "--rm"]
         if self.network:
             command.extend(["--network", self.network])
-        command.extend(["--add-host", f"{self.gateway_host}:host-gateway"])
+        if self.gateway_ip:
+            command.extend(["--add-host", f"{self.gateway_host}:{self.gateway_ip}"])
         for key, value in sorted(env.items()):
             if key == "MACO_GATEWAY_TOKEN" and self.context.gateway.token:
                 host_env[key] = self.context.gateway.token
@@ -156,3 +164,22 @@ class DockerSandboxProvider(RemoteSandboxProvider):
             else:
                 redacted.append(part)
         return redacted
+
+
+def _docker_gateway_url(url: str, *, gateway_host: str, gateway_ip: str | None) -> str:
+    translated = translate_loopback_url(url, gateway_host)
+    if gateway_ip and _url_host(translated) in {gateway_ip, "0.0.0.0"}:
+        return _replace_url_host(translated, gateway_host)
+    return translated
+
+
+def _url_host(url: str) -> str | None:
+    return urlsplit(url).hostname
+
+
+def _replace_url_host(url: str, host: str) -> str:
+    parts = urlsplit(url)
+    netloc = host
+    if parts.port is not None:
+        netloc = f"{host}:{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))

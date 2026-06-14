@@ -83,11 +83,7 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
     )
     command.add_argument(
         "--gateway-host",
-        help=(
-            "host for the managed gateway started by serve-mcp "
-            "(default: 127.0.0.1, or 0.0.0.0 for docker; "
-            "matchlock also binds 192.168.100.1)"
-        ),
+        help="host for the managed gateway started by serve-mcp",
     )
     command.add_argument(
         "--gateway-port",
@@ -115,6 +111,10 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
         "--docker-gateway-host",
         default="host.docker.internal",
         help="hostname inside docker that reaches the host gateway",
+    )
+    command.add_argument(
+        "--docker-gateway-ip",
+        help="explicit host gateway IP to map inside Docker; usually auto-detected",
     )
     command.add_argument("--matchlock-binary", default="matchlock", help="matchlock binary path/name")
     command.add_argument(
@@ -210,6 +210,7 @@ def _cmd_serve_mcp(args: argparse.Namespace) -> int:
             docker_binary=args.docker_binary,
             docker_network=args.docker_network,
             docker_gateway_host=args.docker_gateway_host,
+            docker_gateway_ip=args.docker_gateway_ip,
             matchlock_binary=args.matchlock_binary,
             matchlock_gateway_host=args.matchlock_gateway_host,
             matchlock_gateway_ip=args.matchlock_gateway_ip,

@@ -109,6 +109,7 @@ def provider_from_name(
     docker_binary: str = "docker",
     docker_network: str | None = None,
     docker_gateway_host: str = "host.docker.internal",
+    docker_gateway_ip: str | None = None,
     matchlock_binary: str = "matchlock",
     matchlock_gateway_host: str = "maco-gateway.internal",
     matchlock_gateway_ip: str | None = None,
@@ -132,6 +133,7 @@ def provider_from_name(
             docker_binary=docker_binary,
             network=docker_network,
             gateway_host=docker_gateway_host,
+            gateway_ip=docker_gateway_ip,
         )
     if normalized == "matchlock":
         return MatchlockSandboxProvider(

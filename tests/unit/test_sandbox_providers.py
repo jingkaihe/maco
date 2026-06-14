@@ -62,6 +62,7 @@ def test_docker_provider_bootstraps_and_execs_without_host_sdk_mounts(tmp_path, 
         image="maco-test:latest",
         docker_binary="docker-test",
         gateway_host="host.docker.internal",
+        gateway_ip="172.17.0.1",
     )
     calls: list[tuple[list[str], dict[str, Any]]] = []
 
@@ -80,7 +81,7 @@ def test_docker_provider_bootstraps_and_execs_without_host_sdk_mounts(tmp_path, 
     assert run_command[:3] == ["docker-test", "run", "-d"]
     assert "--rm" in run_command
     assert "--add-host" in run_command
-    assert "host.docker.internal:host-gateway" in run_command
+    assert "host.docker.internal:172.17.0.1" in run_command
     assert "MACO_GATEWAY_URL=http://host.docker.internal:9/" in run_command
     assert "MACO_GATEWAY_TOKEN" in run_command
     assert "MACO_GATEWAY_TOKEN=secret-token" not in run_command
@@ -110,6 +111,34 @@ def test_docker_provider_bootstraps_and_execs_without_host_sdk_mounts(tmp_path, 
         "echo hi",
     ]
     assert exec_kwargs["timeout"] == 7
+
+    provider.stop()
+    assert calls[-1][0] == ["docker-test", "rm", "-f", "container-123"]
+
+
+def test_docker_provider_without_gateway_ip_preserves_desktop_host_alias(tmp_path, monkeypatch):
+    context = _context(tmp_path)
+    provider = DockerSandboxProvider(
+        context,
+        image="maco-test:latest",
+        docker_binary="docker-test",
+        gateway_host="host.docker.internal",
+    )
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        if command[:3] == ["docker-test", "run", "-d"]:
+            return subprocess.CompletedProcess(command, 0, stdout="container-123\n", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(docker_provider.subprocess, "run", fake_run)
+
+    provider.start()
+
+    run_command = calls[0][0]
+    assert "--add-host" not in run_command
+    assert "MACO_GATEWAY_URL=http://host.docker.internal:9/" in run_command
 
     provider.stop()
     assert calls[-1][0] == ["docker-test", "rm", "-f", "container-123"]

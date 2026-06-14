@@ -162,13 +162,11 @@ The sandboxed MCP server is the one-command MCP-mode entrypoint: it generates wr
 uv run maco serve-mcp --config mcp.json --workspace .maco --clean --provider local --port 8789
 ```
 
-Providers are selected with `--provider local|docker|matchlock`.
+Providers are selected with `--provider local|docker|matchlock`:
 
-- `local` runs commands as local subprocesses and writes the sandbox SDK under the configured workspace.
-- `docker` rewrites loopback gateway URLs to `http://host.docker.internal:<port>/`, starts one long-lived container, bootstraps `/workspace/macosdk/tools` inside it, and executes commands with `docker exec`.
-- `matchlock` uses the Matchlock Python SDK, rewrites loopback gateway URLs to `http://maco-gateway.internal:<port>/`, starts one long-lived VM, bootstraps `/workspace/macosdk/tools` inside it, and maps the gateway hostname to the Matchlock host gateway IP.
-
-When `serve-mcp` manages the gateway itself, it binds the primary gateway to `127.0.0.1` for local/Matchlock and `0.0.0.0` for Docker. For Matchlock it also binds the same port on `192.168.100.1` and maps `maco-gateway.internal` to that address inside the VM, avoiding a wildcard host listener. If you already run a separate `maco serve`, pass `--gateway-file path/to/gateway.json` to use that gateway instead; for Matchlock, that external gateway still needs to be reachable from the VM.
+- `local` — fastest feedback loop; runs commands as local subprocesses with no isolation.
+- `docker` — container-level isolation; starts one long-lived container, bootstraps the sandbox SDK inside it, and executes commands with `docker exec`.
+- `matchlock` — VM-level isolation; starts one long-lived Matchlock micro-VM, bootstraps the sandbox SDK inside it, and executes commands through the Matchlock SDK.
 
 The default Docker/Matchlock sandbox image is built from `images/sandbox/Dockerfile`:
 

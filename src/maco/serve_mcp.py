@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
 from pathlib import Path
+import subprocess
+import sys
 from typing import Annotated, Any
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
@@ -55,6 +58,7 @@ class ServeMcpOptions:
     docker_binary: str = "docker"
     docker_network: str | None = None
     docker_gateway_host: str = "host.docker.internal"
+    docker_gateway_ip: str | None = None
     matchlock_binary: str = "matchlock"
     matchlock_gateway_host: str = "maco-gateway.internal"
     matchlock_gateway_ip: str | None = None
@@ -80,15 +84,34 @@ def serve_mcp(options: ServeMcpOptions) -> None:
         )
         normalized_provider = _normalize_provider(options.provider)
         managed_gateway = options.gateway_file is None
-        matchlock_gateway_ip = _matchlock_gateway_ip(
-            options.matchlock_gateway_ip,
-            managed_gateway=managed_gateway,
-            gateway_file=gateway_file,
+        docker_gateway_ip = (
+            _docker_gateway_ip(
+                options.docker_gateway_ip,
+                managed_gateway=managed_gateway,
+                docker_binary=options.docker_binary,
+                docker_network=options.docker_network,
+            )
+            if normalized_provider == "docker"
+            else None
+        )
+        matchlock_gateway_ip = (
+            _matchlock_gateway_ip(
+                options.matchlock_gateway_ip,
+                managed_gateway=managed_gateway,
+                gateway_file=gateway_file,
+            )
+            if normalized_provider == "matchlock"
+            else None
         )
         if options.gateway_file is None:
             config = load_config(options.config)
-            gateway_host = options.gateway_host or _default_gateway_host(options.provider)
-            extra_hosts = _gateway_extra_hosts(normalized_provider, matchlock_gateway_ip, options.gateway_host)
+            gateway_host = options.gateway_host or _default_gateway_host()
+            extra_hosts = _gateway_extra_hosts(
+                normalized_provider,
+                docker_gateway_ip=docker_gateway_ip,
+                matchlock_gateway_ip=matchlock_gateway_ip,
+                explicit_gateway_host=options.gateway_host,
+            )
             gateway_server = GatewayServer(
                 config,
                 ServeOptions(
@@ -101,6 +124,7 @@ def serve_mcp(options: ServeMcpOptions) -> None:
                     freebind_hosts=_gateway_freebind_hosts(
                         gateway_host,
                         extra_hosts=extra_hosts,
+                        docker_gateway_ip=docker_gateway_ip,
                         matchlock_gateway_ip=matchlock_gateway_ip,
                     ),
                 ),
@@ -133,6 +157,7 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             docker_binary=options.docker_binary,
             docker_network=options.docker_network,
             docker_gateway_host=options.docker_gateway_host,
+            docker_gateway_ip=docker_gateway_ip,
             matchlock_binary=options.matchlock_binary,
             matchlock_gateway_host=options.matchlock_gateway_host,
             matchlock_gateway_ip=matchlock_gateway_ip,
@@ -307,8 +332,8 @@ def _content_addressed_script_filename(code: str) -> str:
     return f"{digest}.py"
 
 
-def _default_gateway_host(provider: str) -> str:
-    return "0.0.0.0" if _normalize_provider(provider) == "docker" else "127.0.0.1"
+def _default_gateway_host() -> str:
+    return "127.0.0.1"
 
 
 def _normalize_provider(provider: str) -> str:
@@ -335,28 +360,120 @@ def _matchlock_gateway_ip(
     return None
 
 
+def _docker_gateway_ip(
+    configured_ip: str | None,
+    *,
+    managed_gateway: bool,
+    docker_binary: str,
+    docker_network: str | None,
+) -> str | None:
+    if configured_ip:
+        return configured_ip
+    if not managed_gateway:
+        return None
+    if _is_docker_desktop(docker_binary):
+        return None
+    detected_ip = _detect_docker_gateway_ip(docker_binary, docker_network)
+    if detected_ip:
+        return detected_ip
+    network = docker_network or "bridge"
+    raise ValueError(
+        f"could not detect Docker gateway IP for network {network!r}; "
+        "pass --docker-gateway-ip explicitly"
+    )
+
+
+def _is_docker_desktop(docker_binary: str) -> bool:
+    if not sys.platform.startswith("linux"):
+        return True
+    try:
+        completed = subprocess.run(
+            [docker_binary, "info", "--format", "{{.OperatingSystem}}"],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return False
+    if completed.returncode != 0:
+        return False
+    return "docker desktop" in completed.stdout.strip().lower()
+
+
+def _detect_docker_gateway_ip(docker_binary: str, docker_network: str | None) -> str | None:
+    network = docker_network or "bridge"
+    try:
+        completed = subprocess.run(
+            [docker_binary, "network", "inspect", network],
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+    except Exception:
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        networks = json.loads(completed.stdout)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(networks, list) or not networks or not isinstance(networks[0], dict):
+        return None
+    ipam = networks[0].get("IPAM")
+    configs = ipam.get("Config") if isinstance(ipam, dict) else None
+    if not isinstance(configs, list):
+        return None
+    for config in configs:
+        if not isinstance(config, dict):
+            continue
+        gateway = config.get("Gateway")
+        if isinstance(gateway, str) and gateway and "." in gateway:
+            return gateway
+    return None
+
+
 def _gateway_extra_hosts(
     provider: str,
+    *,
+    docker_gateway_ip: str | None,
     matchlock_gateway_ip: str | None,
     explicit_gateway_host: str | None,
 ) -> tuple[str, ...]:
-    if provider != "matchlock" or not matchlock_gateway_ip:
+    gateway_ip = _provider_gateway_ip(provider, docker_gateway_ip, matchlock_gateway_ip)
+    if not gateway_ip:
         return ()
     if explicit_gateway_host and explicit_gateway_host not in {"127.0.0.1", "localhost", "::1"}:
         return ()
-    return (matchlock_gateway_ip,)
+    return (gateway_ip,)
 
 
 def _gateway_freebind_hosts(
     gateway_host: str,
     *,
     extra_hosts: tuple[str, ...],
+    docker_gateway_ip: str | None,
     matchlock_gateway_ip: str | None,
 ) -> tuple[str, ...]:
     hosts = list(extra_hosts)
-    if matchlock_gateway_ip and gateway_host == matchlock_gateway_ip:
+    if gateway_host in {docker_gateway_ip, matchlock_gateway_ip}:
         hosts.append(gateway_host)
     return tuple(dict.fromkeys(hosts))
+
+
+def _provider_gateway_ip(
+    provider: str,
+    docker_gateway_ip: str | None,
+    matchlock_gateway_ip: str | None,
+) -> str | None:
+    if provider == "docker":
+        return docker_gateway_ip
+    if provider == "matchlock":
+        return matchlock_gateway_ip
+    return None
 
 
 def _url_host(url: str) -> str | None:

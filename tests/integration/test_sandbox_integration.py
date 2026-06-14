@@ -22,6 +22,7 @@ from maco.sandbox import (
     SandboxContext,
     SandboxExec,
 )
+from maco.serve_mcp import _detect_docker_gateway_ip, _is_docker_desktop
 
 
 TOKEN = "integration-token"
@@ -38,9 +39,10 @@ def test_local_provider_executes_with_gateway_and_generated_workspace(tmp_path):
 def test_docker_provider_executes_with_gateway_and_generated_workspace(tmp_path):
     _require_docker()
     _docker_pull_or_skip(DEFAULT_SANDBOX_IMAGE)
+    gateway_ip = _docker_gateway_ip()
     with fake_gateway(host="0.0.0.0") as gateway:
         context = _context(tmp_path, gateway.url, TOKEN)
-        provider = DockerSandboxProvider(context, image=DEFAULT_SANDBOX_IMAGE)
+        provider = DockerSandboxProvider(context, image=DEFAULT_SANDBOX_IMAGE, gateway_ip=gateway_ip)
         result = _run_smoke(provider)
 
     _assert_smoke(result, expected_gateway_url=_guest_url(gateway.url, "host.docker.internal"))
@@ -242,6 +244,15 @@ def _docker_pull_or_skip(image: str) -> None:
     )
     if pull.returncode != 0:
         pytest.skip(f"could not pull {image}: {pull.stderr.strip()}")
+
+
+def _docker_gateway_ip() -> str | None:
+    if _is_docker_desktop("docker"):
+        return None
+    gateway_ip = _detect_docker_gateway_ip("docker", None)
+    if gateway_ip is None:
+        pytest.skip("could not detect Docker bridge gateway IP")
+    return gateway_ip
 
 
 def _require_matchlock() -> None:
