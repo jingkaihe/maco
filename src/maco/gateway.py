@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from dataclasses import dataclass
 import json
 import os
 from pathlib import Path
 import secrets
 import signal
+import socket
 import sys
 import threading
 import time
@@ -27,6 +29,8 @@ class ServeOptions:
     workspace: str | Path = ".maco"
     token: str | None = None
     use_token: bool = True
+    extra_hosts: tuple[str, ...] = ()
+    freebind_hosts: tuple[str, ...] = ()
 
 
 class ManagerLoop:
@@ -36,14 +40,21 @@ class ManagerLoop:
         self.manager = MCPManager(config)
         self.loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run, name="maco-mcp-loop", daemon=True)
+        self._ready: concurrent.futures.Future[None] = concurrent.futures.Future()
+        self._main_future: concurrent.futures.Future[None] | None = None
+        self._stop_event: asyncio.Event | None = None
 
     def start(self) -> None:
         self._thread.start()
-        self.run(self.manager.start())
+        self._main_future = asyncio.run_coroutine_threadsafe(self._main(), self.loop)
+        self._ready.result()
 
     def stop(self) -> None:
         try:
-            self.run(self.manager.aclose(), timeout=10)
+            if self._stop_event is not None:
+                self.loop.call_soon_threadsafe(self._stop_event.set)
+            if self._main_future is not None:
+                self._main_future.result(timeout=10)
         finally:
             self.loop.call_soon_threadsafe(self.loop.stop)
             self._thread.join(timeout=10)
@@ -63,47 +74,122 @@ class ManagerLoop:
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
 
+    async def _main(self) -> None:
+        try:
+            await self.manager.start()
+            self._stop_event = asyncio.Event()
+            self._ready.set_result(None)
+            await self._stop_event.wait()
+        except Exception as exc:
+            if not self._ready.done():
+                self._ready.set_exception(exc)
+            raise
+        finally:
+            await self.manager.aclose()
+
+
+class GatewayServer:
+    """Managed maco gateway suitable for embedding or blocking CLI use."""
+
+    def __init__(self, config: MacoConfig, options: ServeOptions) -> None:
+        self.config = config
+        self.options = options
+        self.workspace = Path(options.workspace).expanduser().resolve()
+        self.gateway_file = self.workspace / "gateway.json"
+        self.token = options.token if options.use_token else None
+        if options.use_token and not self.token:
+            self.token = secrets.token_urlsafe(32)
+        self.manager_loop = ManagerLoop(config)
+        self.httpd: ThreadingHTTPServer | None = None
+        self.extra_httpds: list[ThreadingHTTPServer] = []
+        self.thread: threading.Thread | None = None
+        self.extra_threads: list[threading.Thread] = []
+        self.url = ""
+        self.extra_urls: list[str] = []
+
+    def start(self) -> GatewayServer:
+        self.workspace.mkdir(parents=True, exist_ok=True)
+        self.manager_loop.start()
+        try:
+            handler_cls = _make_handler(self.manager_loop, self.token)
+            freebind_hosts = set(self.options.freebind_hosts)
+            self.httpd = _make_http_server(
+                self.options.host,
+                self.options.port,
+                handler_cls,
+                freebind=self.options.host in freebind_hosts,
+            )
+            actual_host, actual_port = self.httpd.server_address[:2]
+            display_host = "127.0.0.1" if actual_host in {"0.0.0.0", ""} else actual_host
+            self.url = f"http://{display_host}:{actual_port}/"
+            self.thread = threading.Thread(target=self.httpd.serve_forever, name="maco-gateway", daemon=True)
+            self.thread.start()
+            for index, host in enumerate(dict.fromkeys(self.options.extra_hosts)):
+                if host == self.options.host:
+                    continue
+                extra_httpd = _make_http_server(
+                    host,
+                    actual_port,
+                    handler_cls,
+                    freebind=host in freebind_hosts,
+                )
+                extra_host, extra_port = extra_httpd.server_address[:2]
+                extra_display_host = "127.0.0.1" if extra_host in {"0.0.0.0", ""} else extra_host
+                self.extra_httpds.append(extra_httpd)
+                self.extra_urls.append(f"http://{extra_display_host}:{extra_port}/")
+                thread = threading.Thread(
+                    target=extra_httpd.serve_forever,
+                    name=f"maco-gateway-extra-{index}",
+                    daemon=True,
+                )
+                thread.start()
+                self.extra_threads.append(thread)
+            _write_gateway_file(self.gateway_file, self.url, self.token, self.config.path)
+        except Exception:
+            for httpd, thread in [(self.httpd, self.thread), *zip(self.extra_httpds, self.extra_threads)]:
+                if httpd is not None:
+                    if thread is not None and thread.is_alive():
+                        httpd.shutdown()
+                        thread.join(timeout=10)
+                    httpd.server_close()
+            self.manager_loop.stop()
+            raise
+        return self
+
+    def stop(self) -> None:
+        for httpd in [self.httpd, *self.extra_httpds]:
+            if httpd is not None:
+                httpd.shutdown()
+                httpd.server_close()
+        for thread in [self.thread, *self.extra_threads]:
+            if thread is not None:
+                thread.join(timeout=10)
+        self.manager_loop.stop()
+
 
 def serve(config: MacoConfig, options: ServeOptions) -> None:
     """Run the gateway until interrupted."""
 
-    workspace = Path(options.workspace).expanduser().resolve()
-    workspace.mkdir(parents=True, exist_ok=True)
-    token = options.token if options.use_token else None
-    if options.use_token and not token:
-        token = secrets.token_urlsafe(32)
-
-    manager_loop = ManagerLoop(config)
-    manager_loop.start()
-
-    handler_cls = _make_handler(manager_loop, token)
-    httpd = ThreadingHTTPServer((options.host, options.port), handler_cls)
-    actual_host, actual_port = httpd.server_address[:2]
-    display_host = "127.0.0.1" if actual_host in {"0.0.0.0", ""} else actual_host
-    url = f"http://{display_host}:{actual_port}/"
-    _write_gateway_file(workspace / "gateway.json", url, token, config.path)
-
+    gateway = GatewayServer(config, options).start()
     stop_event = threading.Event()
 
     def _request_shutdown(signum: int, _frame: Any) -> None:
         print(f"\nreceived signal {signum}; stopping maco gateway", file=sys.stderr)
         stop_event.set()
-        threading.Thread(target=httpd.shutdown, daemon=True).start()
 
     old_sigint = signal.signal(signal.SIGINT, _request_shutdown)
     old_sigterm = signal.signal(signal.SIGTERM, _request_shutdown)
     try:
         print("maco gateway started")
-        print(f"  URL: {url}")
-        print(f"  workspace: {workspace}")
-        print(f"  gateway file: {workspace / 'gateway.json'}")
+        print(f"  URL: {gateway.url}")
+        print(f"  workspace: {gateway.workspace}")
+        print(f"  gateway file: {gateway.gateway_file}")
         print("  press Ctrl+C to stop")
-        httpd.serve_forever()
+        stop_event.wait()
     finally:
         signal.signal(signal.SIGINT, old_sigint)
         signal.signal(signal.SIGTERM, old_sigterm)
-        httpd.server_close()
-        manager_loop.stop()
+        gateway.stop()
         if stop_event.is_set():
             print("maco gateway stopped")
 
@@ -119,6 +205,32 @@ def _write_gateway_file(path: Path, url: str, token: str | None, config_path: Pa
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _make_http_server(
+    host: str,
+    port: int,
+    handler_cls: type[BaseHTTPRequestHandler],
+    *,
+    freebind: bool = False,
+) -> ThreadingHTTPServer:
+    httpd = ThreadingHTTPServer((host, port), handler_cls, bind_and_activate=False)
+    try:
+        if freebind:
+            _enable_freebind(httpd.socket)
+        httpd.server_bind()
+        httpd.server_activate()
+    except Exception:
+        httpd.server_close()
+        raise
+    return httpd
+
+
+def _enable_freebind(sock: socket.socket) -> None:
+    if not sys.platform.startswith("linux"):
+        return
+    ip_freebind = getattr(socket, "IP_FREEBIND", 15)
+    sock.setsockopt(socket.SOL_IP, ip_freebind, 1)
+
+
 def _make_handler(manager_loop: ManagerLoop, token: str | None) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "maco-gateway/0.1"
@@ -128,6 +240,9 @@ def _make_handler(manager_loop: ManagerLoop, token: str | None) -> type[BaseHTTP
                 self._write_json({"ok": True, "servers": manager_loop.manager.server_names()})
                 return
             if self.path.rstrip("/") == "/tools":
+                if token and self.headers.get("Authorization") != f"Bearer {token}":
+                    self._write_error(HTTPStatus.UNAUTHORIZED, "unauthorized")
+                    return
                 try:
                     self._write_json({"servers": manager_loop.list_tools()})
                 except Exception as exc:  # pragma: no cover - defensive gateway path

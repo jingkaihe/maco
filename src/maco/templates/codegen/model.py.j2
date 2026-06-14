@@ -1,0 +1,6 @@
+class {{ class_name }}(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra='allow')
+
+{% for field in fields %}
+    {{ field.name }}: {{ field.type_expr }} = {{ field.field_args }}
+{% endfor %}

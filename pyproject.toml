@@ -1,11 +1,13 @@
 [project]
 name = "mcp-as-code"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Execute MCP tools through generated Python code interfaces"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
+    "jinja2>=3.1",
+    "matchlock==0.2.15",
     "mcp>=1.24.0",
     "pydantic>=2.0",
 ]
@@ -14,8 +16,8 @@ dependencies = [
 maco = "maco.cli:main"
 
 [build-system]
-requires = ["uv_build>=0.9.18,<0.10"]
-build-backend = "uv_build"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
@@ -24,5 +26,18 @@ dev = [
     "ty>=0.0.35",
 ]
 
-[tool.uv.build-backend]
-module-name = "maco"
+[tool.hatch.version]
+path = "VERSION.txt"
+pattern = "(?P<version>.+)"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/maco"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/maco",
+    "README.md",
+    "LICENSE",
+    "VERSION.txt",
+    "pyproject.toml",
+]

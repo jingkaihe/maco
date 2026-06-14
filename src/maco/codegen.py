@@ -11,9 +11,29 @@ from pathlib import Path
 import re
 import shutil
 from typing import Any, cast
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
+
+from jinja2 import Environment, PackageLoader, StrictUndefined
 
 from .config import MacoConfig
 from .mcp_manager import MCPManager
+
+
+_CODEGEN_TEMPLATES = Environment(
+    loader=PackageLoader("maco", "templates"),
+    trim_blocks=True,
+    lstrip_blocks=True,
+    keep_trailing_newline=True,
+    undefined=StrictUndefined,
+)
+
+
+def _pyrepr(value: Any) -> str:
+    return repr(value)
+
+
+_CODEGEN_TEMPLATES.filters["pyrepr"] = _pyrepr
 
 
 @dataclass(frozen=True)
@@ -40,25 +60,73 @@ async def generate_async(
 ) -> GenerationStats:
     """Generate Python wrappers for all configured MCP tools."""
 
-    workspace_path = Path(workspace).expanduser().resolve()
-    if clean and workspace_path.exists():
-        shutil.rmtree(workspace_path)
-    generated_pkg = workspace_path / "maco_generated"
-    servers_pkg = generated_pkg / "servers"
-    servers_pkg.mkdir(parents=True, exist_ok=True)
-
     async with MCPManager(config) as manager:
         tools_by_server = await manager.list_tools(server_filter=server_filter)
 
+    return generate_from_catalog(
+        tools_by_server,
+        workspace=workspace,
+        clean=clean,
+        config_path=config.path,
+    )
+
+
+def generate_from_catalog(
+    tools_by_server: dict[str, list[dict[str, Any]]],
+    *,
+    workspace: str | Path = ".maco",
+    clean: bool = False,
+    config_path: str | Path | None = None,
+    package_name: str = "maco_generated.servers",
+    client_module: str = "maco_generated.client",
+    package_docstring: str = "Generated MCP wrappers for maco.",
+    servers_docstring: str = "Generated MCP server packages.",
+) -> GenerationStats:
+    """Generate wrappers from an already-fetched MCP tool catalog."""
+
+    workspace_path = Path(workspace).expanduser().resolve()
+    if clean and workspace_path.exists():
+        shutil.rmtree(workspace_path)
+
+    package_parts = package_name.split(".")
+    if not package_parts or any(not part for part in package_parts):
+        raise ValueError("package_name must be a dotted Python package name")
+
+    client_parts = client_module.split(".")
+    if not client_parts or any(not part for part in client_parts):
+        raise ValueError("client_module must be a dotted Python module name")
+
+    generated_pkg = workspace_path / package_parts[0]
+    servers_pkg = workspace_path.joinpath(*package_parts)
+    servers_pkg.mkdir(parents=True, exist_ok=True)
+
     _write_workspace_pyproject(workspace_path)
-    _write_init(generated_pkg / "__init__.py", '"""Generated MCP wrappers for maco."""\n')
-    _write_init(servers_pkg / "__init__.py", '"""Generated MCP server packages."""\n')
-    _write_init(generated_pkg / "py.typed", "")
-    _write_client(generated_pkg / "client.py")
+    _write_template(
+        generated_pkg / "__init__.py",
+        "codegen/package_init.py.j2",
+        docstring=package_docstring,
+    )
+    for depth in range(1, max(len(package_parts) - 1, 1)):
+        package_path = workspace_path.joinpath(*package_parts[: depth + 1])
+        _write_template(
+            package_path / "__init__.py",
+            "codegen/package_init.py.j2",
+            docstring=servers_docstring,
+        )
+    if servers_pkg != generated_pkg:
+        _write_template(
+            servers_pkg / "__init__.py",
+            "codegen/package_init.py.j2",
+            docstring=servers_docstring,
+        )
+    (generated_pkg / "py.typed").write_text("", encoding="utf-8")
+    client_path = workspace_path.joinpath(*client_parts).with_suffix(".py")
+    _write_client(client_path)
 
     manifest = {
         "version": 1,
-        "config": str(config.path),
+        "config": str(config_path) if config_path is not None else None,
+        "package": package_name,
         "servers": [],
     }
 
@@ -82,13 +150,13 @@ async def generate_async(
             tool_name = tool["name"]
             func_name = tool_module_names[tool_name]
             module_path = server_dir / f"{func_name}.py"
-            _write_tool(module_path, server_name, tool, func_name)
+            _write_tool(module_path, server_name, tool, func_name, client_module)
             exports.append(func_name)
             server_manifest["tools"].append(
                 {
                     "name": tool_name,
                     "function": func_name,
-                    "module": f"maco_generated.servers.{server_module}.{func_name}",
+                    "module": f"{package_name}.{server_module}.{func_name}",
                     "description": tool.get("description") or "",
                 }
             )
@@ -119,26 +187,112 @@ def generate(
     return asyncio.run(generate_async(config, workspace, server_filter, clean))
 
 
-def _write_init(path: Path, content: str) -> None:
+def generate_sandbox_sdk(
+    tools_by_server: dict[str, list[dict[str, Any]]],
+    *,
+    workspace: str | Path,
+    clean: bool = True,
+) -> GenerationStats:
+    """Generate the sandbox-facing SDK package at ``tools.<server>``."""
+
+    return generate_from_catalog(
+        tools_by_server,
+        workspace=workspace,
+        clean=clean,
+        package_name="tools",
+        client_module="tools._client",
+        package_docstring="Generated sandbox tools for maco.",
+        servers_docstring="Generated sandbox tool modules.",
+    )
+
+
+def generate_sandbox_sdk_from_gateway(
+    gateway_url: str,
+    *,
+    token: str | None = None,
+    workspace: str | Path,
+    clean: bool = True,
+    timeout: float | None = 30.0,
+) -> GenerationStats:
+    """Generate the sandbox SDK from a running gateway's live tool catalog."""
+
+    return generate_sandbox_sdk(
+        fetch_gateway_tools(gateway_url, token=token, timeout=timeout),
+        workspace=workspace,
+        clean=clean,
+    )
+
+
+def fetch_gateway_tools(
+    gateway_url: str,
+    *,
+    token: str | None = None,
+    timeout: float | None = 30.0,
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch the live tool catalog from a running maco gateway."""
+
+    url = gateway_url.rstrip("/") + "/tools"
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(url, headers=headers, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"failed to fetch maco gateway tools: HTTP {exc.code}: {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"failed to connect to maco gateway at {url}: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("servers"), dict):
+        raise RuntimeError("maco gateway /tools response must contain a servers object")
+    result: dict[str, list[dict[str, Any]]] = {}
+    for server_name, tools in payload["servers"].items():
+        if not isinstance(server_name, str) or not isinstance(tools, list):
+            raise RuntimeError("maco gateway /tools response has an invalid server entry")
+        server_tools: list[dict[str, Any]] = []
+        for tool in tools:
+            if not isinstance(tool, dict):
+                raise RuntimeError("maco gateway /tools response has an invalid tool entry")
+            server_tools.append(tool)
+        result[server_name] = server_tools
+    return result
+
+
+def server_module_names(server_names: Any) -> dict[str, str]:
+    """Return generated module names for configured MCP server names."""
+
+    return _unique_sanitized_names(server_names)
+
+
+def _render_template(template_name: str, **context: Any) -> str:
+    return _CODEGEN_TEMPLATES.get_template(template_name).render(**context)
+
+
+def _render_source(template_name: str, **context: Any) -> str:
+    return _render_template(template_name, **context).rstrip()
+
+
+def _write_template(path: Path, template_name: str, **context: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    path.write_text(_render_template(template_name, **context), encoding="utf-8")
 
 
 def _write_workspace_pyproject(workspace: Path) -> None:
-    (workspace / "pyproject.toml").write_text(
-        """[project]\nname = \"maco-generated-workspace\"\nversion = \"0.0.0\"\nrequires-python = \">=3.11\"\ndependencies = [\n  \"pydantic>=2.0\",\n]\n\n""",
-        encoding="utf-8",
-    )
+    _write_template(workspace / "pyproject.toml", "codegen/pyproject.toml.j2")
 
 
 def _write_client(path: Path) -> None:
-    path.write_text(
-        '''# This file is automatically generated by maco. Do not edit.\n\nfrom __future__ import annotations\n\nimport json\nimport os\nfrom pathlib import Path\nfrom typing import Any\nfrom urllib.error import HTTPError, URLError\nfrom urllib.request import Request, urlopen\n\n\n_CURRENT_DIR = Path(__file__).resolve().parent\n_WORKSPACE_DIR = _CURRENT_DIR.parent\n\n\ndef call_mcp_tool(\n    server_name: str,\n    tool_name: str,\n    arguments: dict[str, Any] | None = None,\n    *,\n    timeout: float | None = 60.0,\n) -> Any:\n    \"\"\"Call an MCP tool through a running maco gateway.\n\n    The gateway is discovered from MACO_GATEWAY_URL or from gateway.json in the\n    generated workspace. Structured MCP output is returned directly when\n    available; otherwise text content is returned, with a best-effort JSON parse.\n    \"\"\"\n\n    gateway = _load_gateway()\n    url = gateway.get(\"url\")\n    if not url:\n        raise RuntimeError(\n            \"maco gateway URL is not configured. Start `maco serve` and run code with `maco run`, \"\n            \"or set MACO_GATEWAY_URL.\"\n        )\n\n    payload = json.dumps(\n        {\n            \"server\": server_name,\n            \"tool\": tool_name,\n            \"arguments\": arguments or {},\n        }\n    ).encode(\"utf-8\")\n    headers = {\"Content-Type\": \"application/json\"}\n    token = os.environ.get(\"MACO_GATEWAY_TOKEN\") or gateway.get(\"token\")\n    if token:\n        headers[\"Authorization\"] = f\"Bearer {token}\"\n\n    request = Request(url, data=payload, headers=headers, method=\"POST\")\n    try:\n        with urlopen(request, timeout=timeout) as response:\n            raw = response.read().decode(\"utf-8\")\n    except HTTPError as exc:\n        detail = exc.read().decode(\"utf-8\", errors=\"replace\")\n        raise RuntimeError(f\"MCP tool {server_name}.{tool_name} failed: HTTP {exc.code}: {detail}\") from exc\n    except URLError as exc:\n        raise RuntimeError(f\"failed to connect to maco gateway at {url}: {exc}\") from exc\n\n    result = json.loads(raw)\n    if result.get(\"isError\"):\n        raise RuntimeError(f\"MCP tool {server_name}.{tool_name} returned an error: {_content_text(result)}\")\n    if \"structuredContent\" in result:\n        return result[\"structuredContent\"]\n    text = _content_text(result)\n    try:\n        return json.loads(text)\n    except Exception:\n        return text\n\n\ndef _load_gateway() -> dict[str, Any]:\n    gateway: dict[str, Any] = {}\n    gateway_file = os.environ.get(\"MACO_GATEWAY_FILE\")\n    if gateway_file:\n        gateway.update(_read_json(Path(gateway_file)))\n    else:\n        gateway.update(_read_json(_WORKSPACE_DIR / \"gateway.json\"))\n    if os.environ.get(\"MACO_GATEWAY_URL\"):\n        gateway[\"url\"] = os.environ[\"MACO_GATEWAY_URL\"]\n    if os.environ.get(\"MACO_GATEWAY_TOKEN\"):\n        gateway[\"token\"] = os.environ[\"MACO_GATEWAY_TOKEN\"]\n    return gateway\n\n\ndef _read_json(path: Path) -> dict[str, Any]:\n    try:\n        return json.loads(path.read_text(encoding=\"utf-8\"))\n    except FileNotFoundError:\n        return {}\n\n\ndef _content_text(result: dict[str, Any]) -> str:\n    parts: list[str] = []\n    for block in result.get(\"content\") or []:\n        if isinstance(block, dict) and block.get(\"type\") == \"text\":\n            parts.append(str(block.get(\"text\", \"\")))\n        elif isinstance(block, dict):\n            parts.append(json.dumps(block, sort_keys=True))\n        else:\n            parts.append(str(block))\n    return \"\".join(parts)\n''',
-        encoding="utf-8",
-    )
+    _write_template(path, "codegen/client.py.j2")
 
 
-def _write_tool(path: Path, server_name: str, tool: dict[str, Any], func_name: str) -> None:
+def _write_tool(
+    path: Path,
+    server_name: str,
+    tool: dict[str, Any],
+    func_name: str,
+    client_module: str,
+) -> None:
     tool_name = tool["name"]
     description = tool.get("description") or ""
     input_schema = tool.get("inputSchema") or {"type": "object", "properties": {}}
@@ -150,29 +304,26 @@ def _write_tool(path: Path, server_name: str, tool: dict[str, Any], func_name: s
         missing_type_expr="_t.Any",
     )
     return_expr = _return_expr(output_type)
-    if input_type.is_model:
-        validate_input = (
-            f"    validated_input = {input_type.type_expr}.model_validate(payload)\n"
-            "    payload = validated_input.model_dump(by_alias=True, exclude_none=True)\n"
-        )
-    else:
-        validate_input = ""
-    path.write_text(
-        f'''# This file is automatically generated by maco. Do not edit.\n\nfrom __future__ import annotations\n\nimport typing as _t\n\nfrom pydantic import BaseModel, ConfigDict, Field, RootModel\n\nfrom maco_generated.client import call_mcp_tool\n\n\nSERVER_NAME = {server_name!r}\nTOOL_NAME = {tool_name!r}\nDESCRIPTION = {description!r}\n\n\n{input_type.source}\n\n\n{output_type.source}\n\n\ndef {func_name}(arguments: {input_type.type_expr} | dict[str, _t.Any] | None = None, **kwargs: _t.Any) -> {output_type.type_expr}:\n    \"\"\"{_docstring(description, input_schema, output_schema)}\"\"\"\n\n    payload: dict[str, _t.Any] = {{}}\n    if arguments is not None:\n        if isinstance(arguments, BaseModel):\n            payload.update(arguments.model_dump(by_alias=True, exclude_none=True))\n        else:\n            payload.update(arguments)\n    payload.update(kwargs)\n{validate_input}    result = call_mcp_tool(SERVER_NAME, TOOL_NAME, payload)\n    return {return_expr}\n''',
-        encoding="utf-8",
+    _write_template(
+        path,
+        "codegen/tool.py.j2",
+        description=description,
+        docstring=_docstring(description, input_schema, output_schema),
+        func_name=func_name,
+        input_is_model=input_type.is_model,
+        input_type_expr=input_type.type_expr,
+        input_type_source=input_type.source,
+        output_type_expr=output_type.type_expr,
+        output_type_source=output_type.source,
+        return_expr=return_expr,
+        client_module=client_module,
+        server_name=server_name,
+        tool_name=tool_name,
     )
 
 
 def _write_server_init(path: Path, exports: list[str]) -> None:
-    lines = ["# This file is automatically generated by maco. Do not edit.\n"]
-    for name in exports:
-        lines.append(f"from .{name} import {name}\n")
-    lines.append("\n")
-    lines.append("__all__ = [\n")
-    for name in exports:
-        lines.append(f"    {name!r},\n")
-    lines.append("]\n")
-    path.write_text("".join(lines), encoding="utf-8")
+    _write_template(path, "codegen/server_init.py.j2", exports=exports)
 
 
 def _typed_dict_source(class_name: str, schema: dict[str, Any]) -> str:
@@ -189,7 +340,7 @@ def _schema_type_source(
 ) -> TypeSource:
     if not isinstance(schema, dict):
         root_type = _class_name(root_name)
-        return TypeSource(f"{root_type} = {missing_type_expr}", root_type)
+        return TypeSource(_render_type_alias(root_type, missing_type_expr), root_type)
     used_names: set[str] = set()
     return _schema_to_type(_class_name(root_name), schema, schema, used_names, define_named=True)
 
@@ -301,7 +452,7 @@ def _object_type_source(
         reserved_name = _reserve_type_name(type_name, used_names)
         required = {field for field in schema.get("required", []) if isinstance(field, str)}
         definitions: list[str] = []
-        field_lines = [f"class {reserved_name}(BaseModel):", "    model_config = ConfigDict(populate_by_name=True, extra='allow')", ""]
+        fields: list[dict[str, str]] = []
         used_fields: set[str] = set()
         for raw_prop_name, raw_prop_schema in sorted(properties.items()):
             prop_name = str(raw_prop_name)
@@ -320,8 +471,14 @@ def _object_type_source(
                 type_expr = _optional_type(type_expr)
             field_name = _safe_field_name(prop_name, used_fields)
             field_args = _field_args(prop_name, prop_schema, default, field_name)
-            field_lines.append(f"    {field_name}: {type_expr} = {field_args}")
-        definitions.append("\n".join(field_lines))
+            fields.append(
+                {
+                    "field_args": field_args,
+                    "name": field_name,
+                    "type_expr": type_expr,
+                }
+            )
+        definitions.append(_render_source("codegen/model.py.j2", class_name=reserved_name, fields=fields))
         return TypeSource(_join_definitions(definitions), reserved_name, is_model=True)
 
     additional = schema.get("additionalProperties")
@@ -368,11 +525,20 @@ def _maybe_alias(
     reserved_name = _reserve_type_name(type_name, used_names)
     if _is_root_model_expr(type_expr):
         return TypeSource(
-            _join_definitions([*definitions, f"class {reserved_name}(RootModel[{type_expr}]):\n    pass"]),
+            _join_definitions(
+                [
+                    *definitions,
+                    _render_source("codegen/root_model.py.j2", class_name=reserved_name, type_expr=type_expr),
+                ]
+            ),
             reserved_name,
             is_model=True,
         )
-    return TypeSource(_join_definitions([*definitions, f"{reserved_name} = {type_expr}"]), reserved_name)
+    return TypeSource(_join_definitions([*definitions, _render_type_alias(reserved_name, type_expr)]), reserved_name)
+
+
+def _render_type_alias(type_name: str, type_expr: str) -> str:
+    return _render_source("codegen/type_alias.py.j2", type_name=type_name, type_expr=type_expr)
 
 
 def _is_root_model_expr(type_expr: str) -> bool:
@@ -477,14 +643,6 @@ def _reserve_type_name(type_name: str, used_names: set[str]) -> str:
 def _docstring(description: str, input_schema: dict[str, Any], output_schema: Any) -> str:
     del input_schema, output_schema
     return (description.strip() or "Call the MCP tool.").replace('"""', '\"\"\"')
-
-
-def _indent(text: str, prefix: str) -> str:
-    return "\n".join(prefix + line if line else prefix.rstrip() for line in text.splitlines())
-
-
-def _json_literal(value: Any) -> str:
-    return repr(value)
 
 
 def _unique_sanitized_names(names: Any) -> dict[str, str]:

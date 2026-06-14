@@ -1,0 +1,56 @@
+#!/usr/bin/env python3
+"""Write maco build metadata used by `maco version`."""
+
+from __future__ import annotations
+
+import argparse
+from datetime import UTC, date
+from pathlib import Path
+import subprocess
+
+
+DEFAULT_CONTENT = '''"""Build metadata embedded during release builds."""
+
+COMMIT_SHA: str | None = None
+RELEASE_DATE: str | None = None
+'''
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="write src/maco/_build_info.py")
+    parser.add_argument("--commit", help="commit SHA to embed; defaults to git rev-parse HEAD")
+    parser.add_argument("--date", help="release date to embed; defaults to today's UTC date")
+    parser.add_argument("--reset", action="store_true", help="restore default unreleased build metadata")
+    args = parser.parse_args()
+
+    repo = Path(__file__).resolve().parents[1]
+    output = repo / "src" / "maco" / "_build_info.py"
+
+    if args.reset:
+        output.write_text(DEFAULT_CONTENT, encoding="utf-8")
+        return 0
+
+    commit = args.commit or _git_commit(repo)
+    release_date = args.date or date.today().strftime("%Y-%m-%d")
+    output.write_text(
+        '"""Build metadata embedded during release builds."""\n\n'
+        f'COMMIT_SHA = "{commit}"\n'
+        f'RELEASE_DATE = "{release_date}"\n',
+        encoding="utf-8",
+    )
+    return 0
+
+
+def _git_commit(repo: Path) -> str:
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo,
+        check=True,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

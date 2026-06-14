@@ -1,0 +1,300 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+import re
+import subprocess
+
+import pytest
+
+from maco.sandbox import GatewayInfo, SandboxContext, SandboxExec, SandboxRunResult
+import maco.serve_mcp as serve_mcp_module
+from maco.serve_mcp import (
+    _bash_description,
+    _code_execute_description,
+    _content_addressed_script_filename,
+    _default_gateway_host,
+    _detect_docker_gateway_ip,
+    _docker_gateway_ip,
+    _gateway_extra_hosts,
+    _is_docker_desktop,
+    _matchlock_gateway_ip,
+    _mcp_instructions,
+    _result_payload,
+    create_serve_mcp_app,
+)
+
+
+def test_serve_mcp_code_execute_uses_provider_script_command(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    app = create_serve_mcp_app(provider, context)
+
+    result = app.call_tool("code_execute", {"code": "print('hello')", "filename": "task.py"})
+    if hasattr(result, "__await__"):
+        asyncio.run(result)
+
+    assert provider.writes == [("task.py", "print('hello')")]
+    assert provider.requests[0].command == "python /workspace/task.py"
+
+
+def test_serve_mcp_code_execute_omitted_filename_uses_deterministic_path(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    app = create_serve_mcp_app(provider, context)
+    code = "print('hello')"
+
+    result = app.call_tool("code_execute", {"code": code})
+    if hasattr(result, "__await__"):
+        asyncio.run(result)
+
+    relative = _content_addressed_script_filename(code)
+    assert re.fullmatch(r"[0-9a-f]{16}\.py", relative)
+    assert provider.writes == [(relative, code)]
+    assert provider.requests[0].command == f"python /workspace/{relative}"
+
+
+def test_result_payload_contains_only_tool_output_fields():
+    payload = _result_payload(SandboxRunResult(0, "out", ""))
+
+    assert payload == {"ok": True, "exit_code": 0, "stdout": "out", "stderr": ""}
+
+
+def test_serve_mcp_instructions_list_server_modules_and_rg_fd_discovery(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    (context.workspace / "tools" / "echoServer").mkdir(parents=True)
+    (context.workspace / "tools" / "echoServer" / "__init__.py").write_text(
+        "from .echo import echo\n",
+        encoding="utf-8",
+    )
+
+    instructions = _mcp_instructions(provider, context)
+
+    assert "Available generated server modules:" in instructions
+    assert "- echoServer: /workspace/macosdk/tools/echoServer" in instructions
+    assert "rg --files /workspace/macosdk/tools" in instructions
+    assert "fd . /workspace/macosdk/tools -t f" in instructions
+    assert "rg \"^def \" /workspace/macosdk/tools/<server>" in instructions
+    assert "MACO_GATEWAY_URL" not in instructions
+    assert "PYTHONPATH" not in instructions
+
+
+def test_serve_mcp_instructions_include_all_server_modules(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    for index in range(55):
+        server_dir = context.workspace / "tools" / f"server{index:02d}"
+        server_dir.mkdir(parents=True)
+        (server_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    instructions = _mcp_instructions(provider, context)
+
+    assert "..." not in instructions
+    assert "- server00: /workspace/macosdk/tools/server00" in instructions
+    assert "- server54: /workspace/macosdk/tools/server54" in instructions
+
+
+def test_code_execute_description_lists_server_modules(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    (context.workspace / "tools" / "github").mkdir(parents=True)
+    (context.workspace / "tools" / "github" / "__init__.py").write_text(
+        "from .search import search\n",
+        encoding="utf-8",
+    )
+
+    description = _code_execute_description(provider, context)
+
+    assert "from tools.<server> import <tool>" in description
+    assert "For most tasks, pass only the code argument" in description
+    assert "<hash>.py" in description
+    assert "- github: /workspace/macosdk/tools/github" in description
+    assert "/workspace/macosdk/tools/<server>/__init__.py" in description
+    assert "MACO_GATEWAY_URL" not in description
+    assert "PYTHONPATH" not in description
+
+
+def test_code_execute_schema_describes_optional_arguments(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    app = create_serve_mcp_app(provider, context)
+    tools = asyncio.run(app.list_tools())
+    code_execute = next(tool for tool in tools if tool.name == "code_execute")
+
+    schema = code_execute.inputSchema
+    assert schema["required"] == ["code"]
+    assert "Import generated tools" in schema["properties"]["code"]["description"]
+    assert "<hash>.py" in schema["properties"]["filename"]["description"]
+    assert "sys.argv[1:]" in schema["properties"]["args"]["description"]
+    assert "server default" in schema["properties"]["timeout"]["description"]
+
+
+def test_bash_description_uses_concrete_wrapper_paths_without_gateway_details(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+
+    description = _bash_description(provider, context)
+
+    assert "rg --files /workspace/macosdk/tools" in description
+    assert "fd . /workspace/macosdk/tools -t f" in description
+    assert "rg \"^def \" /workspace/macosdk/tools/<server>" in description
+    assert "MACO_GATEWAY_URL" not in description
+    assert "PYTHONPATH" not in description
+
+
+def test_matchlock_managed_gateway_defaults_to_local_bind_plus_gateway_extra_host(tmp_path):
+    assert _default_gateway_host() == "127.0.0.1"
+    gateway_ip = _matchlock_gateway_ip(None, managed_gateway=True, gateway_file=tmp_path / "missing.json")
+
+    assert gateway_ip == "192.168.100.1"
+    assert _gateway_extra_hosts(
+        "matchlock",
+        docker_gateway_ip=None,
+        matchlock_gateway_ip=gateway_ip,
+        explicit_gateway_host=None,
+    ) == ("192.168.100.1",)
+
+
+def test_matchlock_external_local_gateway_file_does_not_guess_gateway_ip(tmp_path):
+    gateway_file = tmp_path / "gateway.json"
+    gateway_file.write_text(json.dumps({"url": "http://127.0.0.1:12345/"}), encoding="utf-8")
+
+    assert _matchlock_gateway_ip(None, managed_gateway=False, gateway_file=gateway_file) is None
+
+
+def test_docker_managed_gateway_defaults_to_local_bind_plus_bridge_extra_host(monkeypatch):
+    monkeypatch.setattr(serve_mcp_module, "_is_docker_desktop", lambda _binary: False)
+    monkeypatch.setattr(serve_mcp_module, "_detect_docker_gateway_ip", lambda _binary, _network: "172.18.0.1")
+
+    gateway_ip = _docker_gateway_ip(
+        None,
+        managed_gateway=True,
+        docker_binary="docker-test",
+        docker_network="test-network",
+    )
+
+    assert _default_gateway_host() == "127.0.0.1"
+    assert gateway_ip == "172.18.0.1"
+    assert _gateway_extra_hosts(
+        "docker",
+        docker_gateway_ip=gateway_ip,
+        matchlock_gateway_ip=None,
+        explicit_gateway_host=None,
+    ) == ("172.18.0.1",)
+
+
+def test_docker_managed_gateway_preserves_docker_desktop_alias(monkeypatch):
+    monkeypatch.setattr(serve_mcp_module, "_is_docker_desktop", lambda _binary: True)
+    monkeypatch.setattr(
+        serve_mcp_module,
+        "_detect_docker_gateway_ip",
+        lambda _binary, _network: pytest.fail("should not inspect docker networks on Docker Desktop"),
+    )
+
+    gateway_ip = _docker_gateway_ip(
+        None,
+        managed_gateway=True,
+        docker_binary="docker-test",
+        docker_network=None,
+    )
+
+    assert gateway_ip is None
+    assert _gateway_extra_hosts(
+        "docker",
+        docker_gateway_ip=gateway_ip,
+        matchlock_gateway_ip=None,
+        explicit_gateway_host=None,
+    ) == ()
+
+
+def test_docker_managed_gateway_requires_detected_native_linux_gateway(monkeypatch):
+    monkeypatch.setattr(serve_mcp_module, "_is_docker_desktop", lambda _binary: False)
+    monkeypatch.setattr(serve_mcp_module, "_detect_docker_gateway_ip", lambda _binary, _network: None)
+
+    with pytest.raises(ValueError, match="pass --docker-gateway-ip"):
+        _docker_gateway_ip(
+            None,
+            managed_gateway=True,
+            docker_binary="docker-test",
+            docker_network="custom-net",
+        )
+
+
+def test_docker_external_gateway_file_does_not_guess_gateway_ip():
+    assert (
+        _docker_gateway_ip(
+            None,
+            managed_gateway=False,
+            docker_binary="docker-test",
+            docker_network=None,
+        )
+        is None
+    )
+
+
+def test_is_docker_desktop_uses_docker_operating_system(monkeypatch):
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command == ["docker-test", "info", "--format", "{{.OperatingSystem}}"]
+        return subprocess.CompletedProcess(command, 0, stdout="Docker Desktop\n", stderr="")
+
+    monkeypatch.setattr(serve_mcp_module.sys, "platform", "linux")
+    monkeypatch.setattr(serve_mcp_module.subprocess, "run", fake_run)
+
+    assert _is_docker_desktop("docker-test") is True
+
+
+def test_detect_docker_gateway_ip_reads_network_gateway(monkeypatch):
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        assert command == ["docker-test", "network", "inspect", "custom-net"]
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps([{"IPAM": {"Config": [{"Gateway": "172.19.0.1"}]}}]),
+            stderr="",
+        )
+
+    monkeypatch.setattr(serve_mcp_module.subprocess, "run", fake_run)
+
+    assert _detect_docker_gateway_ip("docker-test", "custom-net") == "172.19.0.1"
+
+
+def _context(tmp_path: Path) -> SandboxContext:
+    workspace = tmp_path / ".maco"
+    (workspace / "tools").mkdir(parents=True)
+    (workspace / "gateway.json").write_text(
+        json.dumps({"url": "http://127.0.0.1:9/", "token": "secret-token"}),
+        encoding="utf-8",
+    )
+    return SandboxContext(
+        workspace=workspace.resolve(),
+        scratch=(tmp_path / "scratch").resolve(),
+        gateway=GatewayInfo.from_file(workspace / "gateway.json"),
+    )
+
+
+class RecordingProvider:
+    guest_workspace = "/workspace/macosdk"
+    guest_scratch = "/workspace"
+
+    def __init__(self) -> None:
+        self.requests: list[SandboxExec] = []
+        self.writes: list[tuple[str, str]] = []
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def write_file(self, relative_path: str, content: str) -> str:
+        self.writes.append((relative_path, content))
+        return f"/workspace/{relative_path}"
+
+    def run(self, request: SandboxExec) -> SandboxRunResult:
+        self.requests.append(request)
+        return SandboxRunResult(0, "", "")
+
+    def python_script_command(self, guest_script_path: str, args: list[str]) -> str:
+        return " ".join(["python", guest_script_path, *args])

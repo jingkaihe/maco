@@ -8,8 +8,8 @@ import time
 from urllib.request import urlopen
 
 
-def test_gen_serve_run_end_to_end(tmp_path):
-    repo = Path(__file__).resolve().parents[1]
+def test_serve_generates_wrappers_and_run_end_to_end(tmp_path):
+    repo = Path(__file__).resolve().parents[2]
     config_path = tmp_path / "mcp.json"
     workspace = tmp_path / ".maco"
     config_path.write_text(
@@ -29,23 +29,6 @@ def test_gen_serve_run_end_to_end(tmp_path):
                 }
             }
         )
-    )
-
-    subprocess.run(
-        [
-            "uv",
-            "run",
-            "--project",
-            str(repo),
-            "maco",
-            "gen",
-            "--config",
-            str(config_path),
-            "--workspace",
-            str(workspace),
-            "--clean",
-        ],
-        check=True,
     )
 
     script = tmp_path / "use_tools.py"
@@ -75,6 +58,7 @@ print(sum_result.result)
             str(config_path),
             "--workspace",
             str(workspace),
+            "--clean",
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

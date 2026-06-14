@@ -5,7 +5,35 @@ import sys
 from types import ModuleType
 from typing import Any
 
-from maco.codegen import _sanitize_identifier, _schema_type_source, _typed_dict_source
+from maco.codegen import _sanitize_identifier, _schema_type_source, _typed_dict_source, generate_sandbox_sdk
+
+
+def test_generate_sandbox_sdk_uses_tools_package_layout(tmp_path):
+    stats = generate_sandbox_sdk(
+        {
+            "echo-server": [
+                {
+                    "name": "echo",
+                    "description": "Echo a message",
+                    "inputSchema": {
+                        "type": "object",
+                        "required": ["message"],
+                        "properties": {"message": {"type": "string"}},
+                    },
+                    "outputSchema": {"type": "string"},
+                }
+            ]
+        },
+        workspace=tmp_path,
+    )
+
+    assert stats.tool_count == 1
+    tool_source = (tmp_path / "tools" / "echoServer" / "echo.py").read_text(encoding="utf-8")
+    assert "from tools._client import call_mcp_tool" in tool_source
+    init_source = (tmp_path / "tools" / "echoServer" / "__init__.py").read_text(encoding="utf-8")
+    assert "from .echo import echo" in init_source
+    manifest = (tmp_path / "manifest.json").read_text(encoding="utf-8")
+    assert '"package": "tools"' in manifest
 
 
 def test_sanitize_identifier():

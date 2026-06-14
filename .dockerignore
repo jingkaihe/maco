@@ -1,0 +1,13 @@
+.git
+.maco
+.playwright-mcp
+.pytest_cache
+.ruff_cache
+.venv
+__pycache__
+*.pyc
+build
+dist
+*.egg-info
+examples/**/.maco
+examples/**/scratch

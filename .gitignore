@@ -44,3 +44,8 @@ gateway.json
 *.log
 *.tmp
 *.bak
+
+# Example runtime artifacts
+examples/**/.maco/
+examples/**/scratch/
+examples/**/maco-serve-mcp/

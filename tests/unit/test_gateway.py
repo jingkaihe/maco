@@ -46,6 +46,16 @@ def test_gateway_handler_checks_auth_and_forwards_calls():
         assert health == {"ok": True, "servers": ["fake"]}
 
         with pytest.raises(HTTPError) as exc_info:
+            urlopen(url + "tools", timeout=2)
+        assert exc_info.value.code == 401
+
+        with urlopen(
+            Request(url + "tools", headers={"Authorization": "Bearer secret-token"}), timeout=2
+        ) as response:
+            tools = json.loads(response.read().decode("utf-8"))
+        assert tools == {"servers": {"fake": [{"name": "echo"}]}}
+
+        with pytest.raises(HTTPError) as exc_info:
             urlopen(
                 Request(
                     url,

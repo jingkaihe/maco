@@ -1,0 +1,76 @@
+name: Sandbox image
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/sandbox-image.yml"
+      - "images/sandbox/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "VERSION.txt"
+      - "README.md"
+      - "LICENSE"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/sandbox-image.yml"
+      - "images/sandbox/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "VERSION.txt"
+      - "README.md"
+      - "LICENSE"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/maco
+
+jobs:
+  build:
+    name: Build sandbox image
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Read version
+        id: version
+        shell: bash
+        run: |
+          version="$(tr -d '[:space:]' < VERSION.txt)"
+          if [[ -z "$version" ]]; then
+            echo "VERSION.txt must not be empty" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}-alpine
+            type=sha,prefix=sha-
+
+      - name: Build sandbox image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/sandbox/Dockerfile
+          push: false
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
