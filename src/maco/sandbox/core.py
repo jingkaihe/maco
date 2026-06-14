@@ -17,16 +17,29 @@ class SandboxError(RuntimeError):
 
 def _maco_version() -> str:
     try:
-        return version("maco")
+        return version("mcp-as-code")
     except PackageNotFoundError:
         for parent in Path(__file__).resolve().parents:
             version_file = parent / "VERSION.txt"
             if version_file.exists():
                 return version_file.read_text(encoding="utf-8").strip()
-        return "0.0.0"
+        try:
+            from maco import __version__
+        except ImportError:
+            pass
+        else:
+            if __version__:
+                return __version__
+        raise SandboxError(
+            "cannot determine the default sandbox image; pass --image explicitly"
+        ) from None
 
 
-DEFAULT_SANDBOX_IMAGE = f"ghcr.io/jingkaihe/maco:{_maco_version()}-alpine"
+def default_sandbox_image() -> str:
+    return f"ghcr.io/jingkaihe/maco:{_maco_version()}-alpine"
+
+
+DEFAULT_SANDBOX_IMAGE = default_sandbox_image()
 DEFAULT_MATCHLOCK_GATEWAY_IP = "192.168.100.1"
 SANDBOX_UID = 1000
 SANDBOX_GID = 1000
@@ -144,7 +157,7 @@ def provider_from_name(
     if normalized == "docker":
         return DockerSandboxProvider(
             context,
-            image=image or DEFAULT_SANDBOX_IMAGE,
+            image=image or default_sandbox_image(),
             docker_binary=docker_binary,
             network=docker_network,
             gateway_host=docker_gateway_host,
@@ -153,7 +166,7 @@ def provider_from_name(
     if normalized == "matchlock":
         return MatchlockSandboxProvider(
             context,
-            image=image or DEFAULT_SANDBOX_IMAGE,
+            image=image or default_sandbox_image(),
             matchlock_binary=matchlock_binary,
             gateway_host=matchlock_gateway_host,
             gateway_ip=matchlock_gateway_ip,

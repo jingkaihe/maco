@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError
 import json
 from pathlib import Path
 import subprocess
@@ -7,6 +8,7 @@ from typing import Any
 
 import pytest
 
+import maco
 from maco.sandbox import (
     DEFAULT_SANDBOX_IMAGE,
     DockerSandboxProvider,
@@ -22,6 +24,7 @@ from maco.sandbox import (
     translate_loopback_url,
     write_code_file,
 )
+import maco.sandbox.core as sandbox_core
 import maco.sandbox.providers.docker as docker_provider
 import maco.sandbox.providers.matchlock as matchlock_provider
 
@@ -213,6 +216,69 @@ def test_provider_factory_uses_default_sandbox_image(tmp_path):
     assert isinstance(matchlock, MatchlockSandboxProvider)
     assert docker.image == DEFAULT_SANDBOX_IMAGE
     assert matchlock.image == DEFAULT_SANDBOX_IMAGE
+
+
+def test_sandbox_image_version_uses_distribution_name(monkeypatch):
+    requested_names: list[str] = []
+
+    def fake_version(distribution_name: str) -> str:
+        requested_names.append(distribution_name)
+        return "9.8.7"
+
+    monkeypatch.setattr(sandbox_core, "version", fake_version)
+
+    assert sandbox_core._maco_version() == "9.8.7"
+    assert requested_names == ["mcp-as-code"]
+
+
+def test_sandbox_image_version_falls_back_to_version_file(monkeypatch, tmp_path):
+    def fake_version(_distribution_name: str) -> str:
+        raise PackageNotFoundError
+
+    version_file = tmp_path / "VERSION.txt"
+    version_file.write_text("1.2.3\n", encoding="utf-8")
+    monkeypatch.setattr(sandbox_core, "version", fake_version)
+    monkeypatch.setattr(sandbox_core, "__file__", str(tmp_path / "src" / "maco" / "sandbox" / "core.py"))
+
+    assert sandbox_core._maco_version() == "1.2.3"
+
+
+def test_sandbox_image_version_falls_back_to_package_version(monkeypatch, tmp_path):
+    def fake_version(_distribution_name: str) -> str:
+        raise PackageNotFoundError
+
+    monkeypatch.setattr(sandbox_core, "version", fake_version)
+    monkeypatch.setattr(sandbox_core, "__file__", str(tmp_path / "src" / "maco" / "sandbox" / "core.py"))
+    monkeypatch.setattr(maco, "__version__", "4.5.6")
+
+    assert sandbox_core._maco_version() == "4.5.6"
+
+
+def test_sandbox_image_version_never_falls_back_to_zero(monkeypatch, tmp_path):
+    def fake_version(_distribution_name: str) -> str:
+        raise PackageNotFoundError
+
+    monkeypatch.setattr(sandbox_core, "version", fake_version)
+    monkeypatch.setattr(sandbox_core, "__file__", str(tmp_path / "src" / "maco" / "sandbox" / "core.py"))
+    monkeypatch.setattr(maco, "__version__", "")
+
+    with pytest.raises(SandboxError, match="cannot determine the default sandbox image"):
+        sandbox_core._maco_version()
+
+
+def test_provider_factory_allows_explicit_image_when_default_version_is_unknown(monkeypatch, tmp_path):
+    def fail_default_sandbox_image() -> str:
+        raise SandboxError("missing version")
+
+    monkeypatch.setattr(sandbox_core, "default_sandbox_image", fail_default_sandbox_image)
+    context = _context(tmp_path)
+
+    docker = sandbox_core.provider_from_name("docker", context, image="custom:latest")
+    assert isinstance(docker, DockerSandboxProvider)
+    assert docker.image == "custom:latest"
+
+    with pytest.raises(SandboxError, match="missing version"):
+        sandbox_core.provider_from_name("docker", context)
 
 
 def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, monkeypatch, capsys):
