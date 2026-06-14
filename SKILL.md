@@ -1,9 +1,9 @@
 ---
-name: mcp-as-code
+name: maco
 description: Use maco to access many MCP tools through a compact code-execution interface. Trigger when users want to run or configure maco serve-mcp, use MCP tools through bash/code_execute, run multi-step MCP workflows in Python, filter/join/page large MCP responses locally, or reduce MCP tool-schema context.
 ---
 
-# MCP as Code (`maco`)
+# maco
 
 `maco` lets agents use many upstream MCP tools through a small code-execution surface. It follows the code-execution-with-MCP pattern: keep live MCP sessions and large schemas behind a gateway, then use Python for multi-step work without loading every tool definition into context.
 

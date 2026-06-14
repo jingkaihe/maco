@@ -29,7 +29,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_NAME: ${{ github.repository_owner }}/maco
   IMAGE_TAG: 0.1.0-alpine
 
 jobs:

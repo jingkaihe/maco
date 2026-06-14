@@ -1,6 +1,6 @@
 ## Project overview
 
-`mcp-as-code` (`maco`) is a Python implementation of the MCP code-execution pattern from Kodelet based on Anthropic's MCP code-execution article. It generates Python wrappers for MCP tools, runs a local gateway that owns MCP client sessions, and runs user Python scripts through `uv` with the generated workspace on `PYTHONPATH`.
+`maco` is a Python implementation of the MCP code-execution pattern from Kodelet based on Anthropic's MCP code-execution article. It exposes many MCP tools through a compact code-execution interface backed by generated Python wrappers and a managed gateway.
 
 ## Common commands
 

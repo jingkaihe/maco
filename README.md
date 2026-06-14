@@ -1,6 +1,6 @@
-# mcp-as-code
+# maco
 
-`mcp-as-code` (`maco`) lets an MCP client interact with many upstream MCP tools through a small code-execution interface.
+`maco` (mcp-as-code) lets an MCP client interact with many upstream MCP tools through a small code-execution interface.
 
 It follows Anthropic's [code-execution-with-MCP pattern](https://www.anthropic.com/engineering/code-execution-with-mcp): keep the large MCP surface area behind a gateway, then let agents write short Python programs for loops, filtering, joins, retries, and structured output. Instead of loading hundreds of tool schemas into the context window, the client gets a compact interface for shell discovery and Python execution.
 
@@ -161,7 +161,7 @@ Choose the execution provider with `--provider`:
 - `docker` — runs commands in a long-lived Docker container.
 - `matchlock` — runs commands in a long-lived Matchlock micro-VM.
 
-The default Docker/Matchlock image is `ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine`, which includes `maco`, Python 3.12, `uv`, `pydantic`, `rg`, and `fd`.
+The default Docker/Matchlock image is `ghcr.io/jingkaihe/maco:0.1.0-alpine`, which includes `maco`, Python 3.12, `uv`, `pydantic`, `rg`, and `fd`.
 
 ## Development
 

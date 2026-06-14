@@ -1,5 +1,5 @@
 [project]
-name = "mcp-as-code"
+name = "maco"
 version = "0.1.0"
 description = "Execute MCP tools through generated Python code interfaces"
 readme = "README.md"

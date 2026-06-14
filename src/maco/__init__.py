@@ -1,3 +1,3 @@
-"""mcp-as-code Python interface generator and runner."""
+"""maco Python interface generator and MCP code-execution server."""
 
 __version__ = "0.1.0"

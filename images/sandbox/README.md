@@ -7,12 +7,12 @@ The image extends the pinned Alpine uv/Python image with the `maco` CLI, `ripgre
 ## Build
 
 ```bash
-docker build -f images/sandbox/Dockerfile -t ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine .
+docker build -f images/sandbox/Dockerfile -t ghcr.io/jingkaihe/maco:0.1.0-alpine .
 ```
 
 ## Import into Matchlock
 
 ```bash
-docker save ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine \
-  | matchlock image import ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine
+docker save ghcr.io/jingkaihe/maco:0.1.0-alpine \
+  | matchlock image import ghcr.io/jingkaihe/maco:0.1.0-alpine
 ```
