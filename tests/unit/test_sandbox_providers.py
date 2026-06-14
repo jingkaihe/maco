@@ -81,6 +81,8 @@ def test_docker_provider_bootstraps_and_execs_without_host_sdk_mounts(tmp_path, 
     run_command, run_kwargs = calls[0]
     assert run_command[:3] == ["docker-test", "run", "-d"]
     assert "--rm" in run_command
+    assert _flag_value(run_command, "--name").startswith("maco-sandbox-")
+    assert "maco.managed=true" in run_command
     assert _flag_value(run_command, "--user") == SANDBOX_USER
     assert "--add-host" in run_command
     assert "host.docker.internal:172.17.0.1" in run_command
@@ -148,6 +150,34 @@ def test_docker_provider_without_gateway_ip_preserves_desktop_host_alias(tmp_pat
 
     provider.stop()
     assert calls[-1][0] == ["docker-test", "rm", "-f", "container-123"]
+
+
+def test_docker_provider_stop_uses_container_name_before_id_is_known(tmp_path, monkeypatch):
+    context = _context(tmp_path)
+    provider = DockerSandboxProvider(context, image="maco-test:latest", docker_binary="docker-test")
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        if command[:3] == ["docker-test", "run", "-d"]:
+            raise KeyboardInterrupt
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(docker_provider.subprocess, "run", fake_run)
+
+    with pytest.raises(KeyboardInterrupt):
+        provider.start()
+    provider.stop()
+
+    assert calls[-1] == (
+        ["docker-test", "rm", "-f", provider.container_name],
+        {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+            "timeout": 10,
+            "check": False,
+        },
+    )
 
 
 def test_docker_provider_write_file_writes_inside_container(tmp_path, monkeypatch):
@@ -392,6 +422,73 @@ def test_matchlock_provider_uses_explicit_gateway_ip_mapping(tmp_path, monkeypat
         ("true", "/workspace", context.timeout),
     ]
     assert "hosts=192.0.2.10:maco-gateway.internal" in capsys.readouterr().err
+
+
+def test_matchlock_provider_cleans_up_interrupted_launch(tmp_path, monkeypatch):
+    context = _context(tmp_path)
+    provider = MatchlockSandboxProvider(context, image="maco-test:latest", matchlock_binary="matchlock-test")
+    captured: dict[str, Any] = {}
+
+    class FakeSandbox:
+        def __init__(self, _image: str) -> None:
+            pass
+
+        def with_workspace(self, _path: str) -> FakeSandbox:
+            return self
+
+        def with_user(self, _user: str) -> FakeSandbox:
+            return self
+
+        def with_env_map(self, _env: dict[str, str]) -> FakeSandbox:
+            return self
+
+        def with_env(self, _name: str, _value: str) -> FakeSandbox:
+            return self
+
+        def allow_host(self, _host: str) -> FakeSandbox:
+            return self
+
+        def add_host(self, _host: str, _ip: str) -> FakeSandbox:
+            return self
+
+        def add_secret_with_placeholder(self, *_args: str) -> FakeSandbox:
+            return self
+
+        def mount_memory(self, _guest_path: str) -> FakeSandbox:
+            return self
+
+    class FakeConfig:
+        def __init__(self, binary_path: str) -> None:
+            captured["binary_path"] = binary_path
+
+    class FakeClient:
+        def __init__(self, _config: FakeConfig) -> None:
+            pass
+
+        def start(self) -> None:
+            captured["started"] = True
+
+        def launch(self, _spec: FakeSandbox) -> str:
+            raise KeyboardInterrupt
+
+        def close(self) -> None:
+            captured["closed"] = True
+
+        def remove(self) -> None:
+            captured["removed"] = True
+
+    monkeypatch.setattr(matchlock_provider, "_load_matchlock_sdk", lambda: (FakeClient, FakeConfig, FakeSandbox))
+
+    with pytest.raises(KeyboardInterrupt):
+        provider.start()
+
+    assert captured == {
+        "binary_path": "matchlock-test",
+        "started": True,
+        "closed": True,
+        "removed": True,
+    }
+    assert provider.client is None
 
 
 def test_write_code_file_and_guest_path_are_constrained(tmp_path):

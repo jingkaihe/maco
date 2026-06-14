@@ -44,7 +44,10 @@ def test_docker_provider_executes_with_gateway_and_generated_workspace(tmp_path)
     with fake_gateway(host="0.0.0.0") as gateway:
         context = _context(tmp_path, gateway.url, TOKEN)
         provider = DockerSandboxProvider(context, image=DEFAULT_SANDBOX_IMAGE, gateway_ip=gateway_ip)
-        result = _run_smoke(provider)
+        try:
+            result = _run_smoke(provider)
+        finally:
+            provider.stop()
 
     _assert_smoke(result, expected_gateway_url=_guest_url(gateway.url, "host.docker.internal"))
 
@@ -58,7 +61,10 @@ def test_matchlock_provider_executes_with_gateway_and_generated_workspace(tmp_pa
             image=DEFAULT_SANDBOX_IMAGE,
             gateway_ip="192.168.100.1",
         )
-        result = _run_smoke(provider)
+        try:
+            result = _run_smoke(provider)
+        finally:
+            provider.stop()
 
     _assert_smoke(result, expected_gateway_url=_guest_url(gateway.url, "maco-gateway.internal"))
 

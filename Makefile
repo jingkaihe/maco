@@ -1,7 +1,7 @@
 VERSION := $(shell tr -d '[:space:]' < VERSION.txt)
 IMAGE ?= ghcr.io/jingkaihe/maco:$(VERSION)-alpine
 
-.PHONY: help sync lint type test test-unit test-integration check build build-release clean image image-import version build-info-reset release-tag
+.PHONY: help sync lint type test test-unit test-integration check build build-release clean clean-sandboxes clean-docker-sandboxes clean-matchlock-sandboxes image image-import version build-info-reset release-tag
 
 help:
 	@printf '%s\n' \
@@ -15,6 +15,7 @@ help:
 	  '  make check         Run lint, type, and tests' \
 	  '  make build         Build Python sdist/wheel' \
 	  '  make build-release Build wheel with embedded commit/date metadata' \
+	  '  make clean-sandboxes Remove leaked maco Docker/Matchlock sandboxes' \
 	  '  make image         Build sandbox image using VERSION.txt' \
 	  '  make image-import  Build and import sandbox image into Matchlock' \
 	  '  make version       Print maco version metadata' \
@@ -52,6 +53,24 @@ build-release:
 
 clean:
 	rm -rf build dist src/*.egg-info .pytest_cache .ruff_cache
+
+clean-sandboxes: clean-docker-sandboxes clean-matchlock-sandboxes
+
+clean-docker-sandboxes:
+	@if command -v docker >/dev/null 2>&1; then \
+		ids="$$(docker ps -aq --filter label=maco.managed=true 2>/dev/null || true)"; \
+		if [ -n "$$ids" ]; then docker rm -f $$ids; fi; \
+	fi
+
+clean-matchlock-sandboxes:
+	@if command -v matchlock >/dev/null 2>&1; then \
+		running_ids="$$(matchlock list 2>/dev/null | awk 'NR > 1 && $$3 ~ /(^|\/)maco:/ && $$2 == "running" {print $$1}')"; \
+		if [ -n "$$running_ids" ]; then for id in $$running_ids; do matchlock kill $$id 2>/dev/null || true; done; fi; \
+		ids="$$(matchlock list 2>/dev/null | awk 'NR > 1 && $$3 ~ /(^|\/)maco:/ && $$2 != "running" {print $$1}')"; \
+		if [ -n "$$ids" ]; then for id in $$ids; do matchlock rm $$id 2>/dev/null || true; done; fi; \
+		matchlock gc 2>/dev/null || true; \
+		if [ -n "$$ids" ]; then for id in $$ids; do matchlock rm $$id 2>/dev/null || true; done; fi; \
+	fi
 
 image:
 	docker build -f images/sandbox/Dockerfile -t "$(IMAGE)" .

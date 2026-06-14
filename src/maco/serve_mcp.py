@@ -6,8 +6,11 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
+import signal
 import subprocess
 import sys
+import threading
+from types import FrameType
 from typing import Annotated, Any
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
@@ -66,11 +69,37 @@ class ServeMcpOptions:
     matchlock_allow_host: tuple[str, ...] = ()
 
 
+class _ServeMcpShutdown(KeyboardInterrupt):
+    """Raised from signal handlers so provider cleanup can run."""
+
+
+def _install_shutdown_signal_handlers() -> tuple[tuple[int, Any], ...]:
+    if threading.current_thread() is not threading.main_thread():
+        return ()
+
+    def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
+        print(f"\nreceived signal {signum}; stopping maco serve-mcp", file=sys.stderr)
+        raise _ServeMcpShutdown
+
+    return (
+        (signal.SIGINT, signal.signal(signal.SIGINT, _request_shutdown)),
+        (signal.SIGTERM, signal.signal(signal.SIGTERM, _request_shutdown)),
+    )
+
+
+def _restore_signal_handlers(handlers: tuple[tuple[int, Any], ...]) -> None:
+    if threading.current_thread() is not threading.main_thread():
+        return
+    for signum, handler in handlers:
+        signal.signal(signum, handler)
+
+
 def serve_mcp(options: ServeMcpOptions) -> None:
     """Run a streamable HTTP MCP server exposing sandboxed bash/code tools."""
 
     gateway_server: GatewayServer | None = None
     provider: SandboxProvider | None = None
+    old_signal_handlers = _install_shutdown_signal_handlers()
     try:
         workspace = Path(options.workspace).expanduser().resolve()
         scratch = (
@@ -173,11 +202,16 @@ def serve_mcp(options: ServeMcpOptions) -> None:
         print(f"  SDK: {provider.guest_workspace}")
         print(f"  scratch: {scratch}")
         app.run("streamable-http")
+    except _ServeMcpShutdown:
+        pass
     finally:
-        if provider is not None:
-            provider.stop()
-        if gateway_server is not None:
-            gateway_server.stop()
+        _restore_signal_handlers(old_signal_handlers)
+        try:
+            if provider is not None:
+                provider.stop()
+        finally:
+            if gateway_server is not None:
+                gateway_server.stop()
 
 
 def create_serve_mcp_app(
@@ -192,7 +226,7 @@ def create_serve_mcp_app(
 
     Separated for tests and future embedding. Tools intentionally return plain
     JSON-serializable dictionaries so MCP clients can inspect exit status,
-    stdout, stderr, and the provider command that was executed.
+    stdout, and stderr.
     """
 
     app = FastMCP(

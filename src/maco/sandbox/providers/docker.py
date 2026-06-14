@@ -6,6 +6,7 @@ import os
 import shlex
 import subprocess
 import sys
+import uuid
 from urllib.parse import urlsplit, urlunsplit
 
 from ..core import (
@@ -39,7 +40,9 @@ class DockerSandboxProvider(RemoteSandboxProvider):
         self.network = network
         self.gateway_host = gateway_host
         self.gateway_ip = gateway_ip
+        self.container_name = self._container_name()
         self.container_id: str | None = None
+        self._start_attempted = False
 
     def start(self) -> None:
         if self.container_id is not None:
@@ -51,7 +54,20 @@ class DockerSandboxProvider(RemoteSandboxProvider):
         )
         env = self._guest_env({}, gateway_url=gateway_url)
         host_env = os.environ.copy()
-        command = [self.docker_binary, "run", "-d", "--rm", "--user", SANDBOX_USER]
+        command = [
+            self.docker_binary,
+            "run",
+            "-d",
+            "--rm",
+            "--user",
+            SANDBOX_USER,
+            "--name",
+            self.container_name,
+            "--label",
+            "org.opencontainers.image.title=maco-sandbox",
+            "--label",
+            "maco.managed=true",
+        ]
         if self.network:
             command.extend(["--network", self.network])
         if self.gateway_ip:
@@ -63,35 +79,42 @@ class DockerSandboxProvider(RemoteSandboxProvider):
             else:
                 command.extend(["-e", f"{key}={value}"])
         command.extend(["-w", self.guest_scratch, self.image])
-        completed = subprocess.run(
-            command,
-            env=host_env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=self.context.timeout,
-            check=False,
-        )
-        if completed.returncode != 0:
-            raise SandboxError(f"failed to start Docker sandbox: {completed.stderr.strip()}")
-        self.container_id = completed.stdout.strip()
+        self._start_attempted = True
         try:
+            completed = subprocess.run(
+                command,
+                env=host_env,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=self.context.timeout,
+                check=False,
+            )
+            if completed.returncode != 0:
+                raise SandboxError(f"failed to start Docker sandbox: {completed.stderr.strip()}")
+            self.container_id = completed.stdout.strip()
             self._bootstrap_sdk()
-        except Exception:
+        except BaseException:
             self.stop()
             raise
 
     def stop(self) -> None:
-        if self.container_id is None:
+        if self.container_id is None and not self._start_attempted:
             return
-        subprocess.run(
-            [self.docker_binary, "rm", "-f", self.container_id],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-            check=False,
-        )
-        self.container_id = None
+        target = self.container_id or self.container_name
+        try:
+            subprocess.run(
+                [self.docker_binary, "rm", "-f", target],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                check=False,
+            )
+        except Exception:
+            pass
+        finally:
+            self.container_id = None
+            self._start_attempted = False
 
     def run(self, request: SandboxExec) -> SandboxRunResult:
         self.start()
@@ -181,6 +204,9 @@ class DockerSandboxProvider(RemoteSandboxProvider):
             else:
                 redacted.append(part)
         return redacted
+
+    def _container_name(self) -> str:
+        return f"maco-sandbox-{uuid.uuid4().hex[:12]}"
 
 
 def _docker_gateway_url(url: str, *, gateway_host: str, gateway_ip: str | None) -> str:
