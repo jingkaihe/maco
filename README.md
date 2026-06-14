@@ -37,6 +37,20 @@ upstream MCP servers from mcp.json
 
 `maco serve-mcp` starts a managed gateway for the upstream MCP servers, prepares a generated Python SDK for the sandbox, and serves a compact MCP endpoint for downstream clients.
 
+## Installation
+
+Install the Python package `mcp-as-code`; it provides the `maco` executable:
+
+```bash
+uv tool install mcp-as-code
+```
+
+Then verify the CLI:
+
+```bash
+maco version
+```
+
 ## Quick start
 
 Create a Claude-style `mcp.json`:
@@ -55,8 +69,10 @@ Create a Claude-style `mcp.json`:
 Start the `maco` MCP server:
 
 ```bash
-uv run maco serve-mcp --config mcp.json --provider local
+maco serve-mcp --config mcp.json --provider docker
 ```
+
+Use `--provider local` for a faster, non-isolated local feedback loop.
 
 By default this serves Streamable HTTP MCP at `http://127.0.0.1:8789/mcp`.
 
@@ -107,7 +123,7 @@ See [`examples/serve-mcp`](examples/serve-mcp) for a complete example that wraps
 If you are using the source checkout directly, the script wrapper is equivalent:
 
 ```bash
-./scripts/maco-serve-mcp --config mcp.json --provider local
+./scripts/maco-serve-mcp --config mcp.json --provider docker
 ```
 
 ## MCP config
