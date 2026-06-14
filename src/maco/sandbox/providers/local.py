@@ -12,6 +12,7 @@ from .base import BaseSandboxProvider
 class LocalSandboxProvider(BaseSandboxProvider):
     """Run commands as local subprocesses with maco env injected."""
 
+    default_python_command = "uv run python"
     guest_workspace: str
     guest_scratch: str
 

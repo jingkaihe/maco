@@ -14,6 +14,9 @@ class SandboxError(RuntimeError):
     """Raised when a sandbox provider cannot run a command."""
 
 
+DEFAULT_SANDBOX_IMAGE = "ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine"
+
+
 @dataclass(frozen=True)
 class GatewayInfo:
     """Host-side maco gateway coordinates."""
@@ -113,7 +116,7 @@ def provider_from_name(
     if normalized == "docker":
         return DockerSandboxProvider(
             context,
-            image=image or "ghcr.io/astral-sh/uv:python3.12-bookworm",
+            image=image or DEFAULT_SANDBOX_IMAGE,
             docker_binary=docker_binary,
             network=docker_network,
             gateway_host=docker_gateway_host,
@@ -121,7 +124,7 @@ def provider_from_name(
     if normalized == "matchlock":
         return MatchlockSandboxProvider(
             context,
-            image=image or "ghcr.io/astral-sh/uv:python3.12-bookworm",
+            image=image or DEFAULT_SANDBOX_IMAGE,
             matchlock_binary=matchlock_binary,
             gateway_host=matchlock_gateway_host,
             gateway_ip=matchlock_gateway_ip,

@@ -9,6 +9,7 @@ from .codegen import generate
 from .config import ConfigError, load_config
 from .gateway import ServeOptions, serve
 from .runner import RunnerError, exit_with_error, run_code
+from .sandbox import DEFAULT_SANDBOX_IMAGE
 from .serve_mcp import ServeMcpOptions, serve_mcp
 
 
@@ -66,7 +67,10 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
     command.add_argument("--host", default="127.0.0.1", help="HTTP MCP bind host")
     command.add_argument("--port", default=8789, type=int, help="HTTP MCP bind port")
     command.add_argument("--timeout", default=60, type=int, help="default command timeout in seconds")
-    command.add_argument("--image", help="container image for docker/matchlock providers")
+    command.add_argument(
+        "--image",
+        help=f"container image for docker/matchlock providers (default: {DEFAULT_SANDBOX_IMAGE})",
+    )
     command.add_argument("--python-command", help="guest command prefix used by code_execute")
     command.add_argument("--docker-binary", default="docker", help="docker binary path/name")
     command.add_argument("--docker-network", help="docker network passed to `docker run --network`")
@@ -113,7 +117,7 @@ def _cmd_gen(args: argparse.Namespace) -> int:
     )
     print(f"Generated {stats.tool_count} tools from {stats.server_count} servers")
     print(f"Workspace: {stats.workspace}")
-    print("Explore: find {}/maco_generated/servers -maxdepth 2 -type f".format(stats.workspace))
+    print("Explore: rg --files {}/maco_generated/servers".format(stats.workspace))
     return 0
 
 

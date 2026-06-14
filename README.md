@@ -99,12 +99,12 @@ Supported transports are `stdio`, `http`/`streamable_http`, and `sse`. Only Clau
 After `maco gen`, discover generated wrappers progressively:
 
 ```bash
-find .maco/maco_generated/servers -maxdepth 2 -type f
+rg --files .maco/maco_generated/servers
 sed -n '1,160p' .maco/maco_generated/servers/<server>/__init__.py
 sed -n '1,220p' .maco/maco_generated/servers/<server>/<tool>.py
 ```
 
-If `rg` is installed, it is a convenient faster substitute for `find`/`grep`, but generated-wrapper discovery does not require it.
+Use `rg --files ... | rg '<keyword>'` when you have a likely tool name, for example `rg --files .maco/maco_generated/servers | rg 'screenshot|navigate'`.
 
 Avoid reading `.maco/manifest.json` by default when working as an agent: it is useful for automation and broad audits, but inspecting every generated tool at once can waste context.
 
@@ -154,7 +154,7 @@ tmux -L llm-agent kill-session -t maco-gateway
 - `bash(command, timeout?)` — run a non-interactive shell command in the configured sandbox.
 - `code_execute(code, filename?, args?, timeout?)` — write and run a Python script that imports generated wrappers.
 
-The server advertises generated server modules with their sandbox paths. Docker and Matchlock use `/workspace/.maco/maco_generated/servers/<server>` for wrapper code and `/workspace` for writable files. Use portable shell commands such as `find` and `grep` through `bash` to inspect wrapper exports before writing `code_execute` scripts; `rg`/`fd` are useful when present but are not required by the default sandbox images.
+The server advertises generated server modules with their sandbox paths. Docker and Matchlock use `/workspace/.maco/maco_generated/servers/<server>` for wrapper code and `/workspace` for writable files. The default sandbox image is `ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine`, which includes `uv`, Python 3.12, `pydantic`, `rg`, and `fd`; use those through `bash` to inspect wrapper exports before writing `code_execute` scripts.
 
 The sandboxed MCP server assumes `maco gen` has created `.maco/` and `maco serve` is already running so `.maco/gateway.json` exists:
 
@@ -169,6 +169,14 @@ Providers are selected with `--provider local|docker|matchlock`.
 - `local` runs commands as local subprocesses and uses the gateway URL from `.maco/gateway.json` directly.
 - `docker` rewrites loopback gateway URLs to `http://host.docker.internal:<port>/`, mounts `.maco` read-only at `/workspace/.maco`, and mounts scratch at `/workspace`.
 - `matchlock` uses the Matchlock Python SDK, rewrites loopback gateway URLs to `http://maco-gateway.internal:<port>/`, mounts `.maco` read-only at `/workspace/.maco`, mounts scratch at `/workspace`, allowlists the gateway host, and passes the gateway token through Matchlock secret placeholders instead of putting the real token in the VM environment.
+
+The default Docker/Matchlock sandbox image is built from `images/sandbox/Dockerfile`:
+
+```bash
+docker build -t ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine images/sandbox
+docker save ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine \
+  | matchlock image import ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine
+```
 
 For Docker or Matchlock, bind the maco gateway to a host address reachable by the sandbox, not only `127.0.0.1`, or place a provider-managed proxy in front of it. Treat the gateway bearer token as a scoped capability; policy enforcement belongs at the gateway, not in generated wrappers.
 

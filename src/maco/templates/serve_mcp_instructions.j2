@@ -11,8 +11,9 @@ Inspect generated wrapper code inside the sandbox at:
   {{ wrapper_root }}/<server>/__init__.py
   {{ wrapper_root }}/<server>/<tool>.py
 
-Use bash for discovery with portable commands such as:
-  find {{ wrapper_root }} -maxdepth 2 -type f
-  grep -R "^def " {{ wrapper_root }}/<server>
+Use bash for discovery with rg/fd:
+  rg --files {{ wrapper_root }}
+  fd . {{ wrapper_root }} -t f
+  rg "^def " {{ wrapper_root }}/<server>
 
 Use code_execute to run Python scripts that import generated wrappers.

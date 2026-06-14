@@ -11,12 +11,13 @@ from ..core import SandboxContext, SandboxExec, normalize_context, posix_join
 class BaseSandboxProvider:
     guest_workspace: str
     guest_scratch: str
+    default_python_command = "python"
 
     def __init__(self, context: SandboxContext) -> None:
         self.context = normalize_context(context)
 
     def python_script_command(self, guest_script_path: str, args: list[str]) -> str:
-        command = self.context.python_command or f"uv run --project {shlex.quote(self.guest_workspace)} python"
+        command = self.context.python_command or self.default_python_command
         return " ".join([command, shlex.quote(guest_script_path), *[shlex.quote(arg) for arg in args]])
 
     def _timeout(self, request: SandboxExec) -> int:

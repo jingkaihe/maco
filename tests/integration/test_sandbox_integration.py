@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 import pytest
 
 from maco.sandbox import (
+    DEFAULT_SANDBOX_IMAGE,
     DockerSandboxProvider,
     GatewayInfo,
     LocalSandboxProvider,
@@ -35,10 +36,10 @@ def test_local_provider_executes_with_gateway_and_generated_workspace(tmp_path):
 
 def test_docker_provider_executes_with_gateway_and_generated_workspace(tmp_path):
     _require_docker()
-    _docker_pull_or_skip("python:3.12-alpine")
+    _docker_pull_or_skip(DEFAULT_SANDBOX_IMAGE)
     with fake_gateway(host="0.0.0.0") as gateway:
         context = _context(tmp_path, gateway.url, TOKEN)
-        provider = DockerSandboxProvider(context, image="python:3.12-alpine")
+        provider = DockerSandboxProvider(context, image=DEFAULT_SANDBOX_IMAGE)
         result = _run_smoke(provider)
 
     _assert_smoke(result, expected_gateway_url=_guest_url(gateway.url, "host.docker.internal"))
@@ -50,7 +51,7 @@ def test_matchlock_provider_executes_with_gateway_and_generated_workspace(tmp_pa
         context = _context(tmp_path, gateway.url, TOKEN)
         provider = MatchlockSandboxProvider(
             context,
-            image="python:3.12-alpine",
+            image=DEFAULT_SANDBOX_IMAGE,
             gateway_ip="192.168.100.1",
         )
         result = _run_smoke(provider)

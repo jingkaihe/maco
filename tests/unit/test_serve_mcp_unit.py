@@ -20,7 +20,7 @@ def test_serve_mcp_code_execute_uses_provider_script_command(tmp_path):
     assert provider.requests[0].command == "python /workspace/task.py"
 
 
-def test_serve_mcp_instructions_list_server_modules_and_portable_discovery(tmp_path):
+def test_serve_mcp_instructions_list_server_modules_and_rg_fd_discovery(tmp_path):
     context = _context(tmp_path)
     provider = RecordingProvider()
     (context.workspace / "maco_generated" / "servers" / "echoServer").mkdir(parents=True)
@@ -33,9 +33,9 @@ def test_serve_mcp_instructions_list_server_modules_and_portable_discovery(tmp_p
 
     assert "Available generated server modules:" in instructions
     assert "- echoServer: /workspace/.maco/maco_generated/servers/echoServer" in instructions
-    assert "find /workspace/.maco/maco_generated/servers" in instructions
-    assert "grep -R \"^def \"" in instructions
-    assert "rg" not in instructions
+    assert "rg --files /workspace/.maco/maco_generated/servers" in instructions
+    assert "fd . /workspace/.maco/maco_generated/servers -t f" in instructions
+    assert "rg \"^def \" /workspace/.maco/maco_generated/servers/<server>" in instructions
     assert "MACO_GATEWAY_URL" not in instructions
     assert "PYTHONPATH" not in instructions
 
@@ -64,8 +64,9 @@ def test_bash_description_uses_concrete_wrapper_paths_without_gateway_details(tm
 
     description = _bash_description(provider, context)
 
-    assert "find /workspace/.maco/maco_generated/servers -maxdepth 2 -type f" in description
-    assert "grep -R \"^def \" /workspace/.maco/maco_generated/servers/<server>" in description
+    assert "rg --files /workspace/.maco/maco_generated/servers" in description
+    assert "fd . /workspace/.maco/maco_generated/servers -t f" in description
+    assert "rg \"^def \" /workspace/.maco/maco_generated/servers/<server>" in description
     assert "MACO_GATEWAY_URL" not in description
     assert "PYTHONPATH" not in description
 

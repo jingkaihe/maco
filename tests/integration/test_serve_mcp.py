@@ -16,6 +16,7 @@ from urllib.request import urlopen
 import httpx
 import pytest
 
+from maco.sandbox import DEFAULT_SANDBOX_IMAGE
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
@@ -421,20 +422,16 @@ def _read_process_output(process: subprocess.Popen[str]) -> str:
 def _require_provider(provider: str) -> None:
     if provider == "docker":
         _require_docker()
-        _docker_pull_or_skip("python:3.12-alpine")
+        _docker_pull_or_skip(DEFAULT_SANDBOX_IMAGE)
     elif provider == "matchlock":
         _require_matchlock()
 
 
 def _provider_args(provider: str) -> list[str]:
     if provider == "docker":
-        return ["--image", "python:3.12-alpine", "--python-command", "python"]
+        return []
     if provider == "matchlock":
         return [
-            "--image",
-            "python:3.12-alpine",
-            "--python-command",
-            "python",
             "--matchlock-gateway-ip",
             "192.168.100.1",
         ]

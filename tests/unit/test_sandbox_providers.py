@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from maco.sandbox import (
+    DEFAULT_SANDBOX_IMAGE,
     DockerSandboxProvider,
     GatewayInfo,
     LocalSandboxProvider,
@@ -86,6 +87,20 @@ def test_docker_provider_builds_guest_reachable_gateway_command(tmp_path, monkey
     assert f"{context.workspace}:/workspace/.maco:ro" in command
     assert command[-4:] == ["maco-test:latest", "sh", "-lc", "echo hi"]
     assert captured["kwargs"]["timeout"] == 7
+
+
+def test_provider_factory_uses_default_sandbox_image(tmp_path):
+    from maco.sandbox import provider_from_name
+
+    context = _context(tmp_path)
+
+    docker = provider_from_name("docker", context)
+    matchlock = provider_from_name("matchlock", context)
+
+    assert isinstance(docker, DockerSandboxProvider)
+    assert isinstance(matchlock, MatchlockSandboxProvider)
+    assert docker.image == DEFAULT_SANDBOX_IMAGE
+    assert matchlock.image == DEFAULT_SANDBOX_IMAGE
 
 
 def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, monkeypatch):
