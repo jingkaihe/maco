@@ -15,6 +15,7 @@ from .codegen import fetch_gateway_tools, generate_sandbox_sdk, server_module_na
 from .config import load_config
 from .gateway import GatewayServer, ServeOptions
 from .sandbox import (
+    DEFAULT_MATCHLOCK_GATEWAY_IP,
     GatewayInfo,
     SandboxContext,
     SandboxExec,
@@ -77,9 +78,17 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             if options.gateway_file is not None
             else workspace / "gateway.json"
         )
+        normalized_provider = _normalize_provider(options.provider)
+        managed_gateway = options.gateway_file is None
+        matchlock_gateway_ip = _matchlock_gateway_ip(
+            options.matchlock_gateway_ip,
+            managed_gateway=managed_gateway,
+            gateway_file=gateway_file,
+        )
         if options.gateway_file is None:
             config = load_config(options.config)
             gateway_host = options.gateway_host or _default_gateway_host(options.provider)
+            extra_hosts = _gateway_extra_hosts(normalized_provider, matchlock_gateway_ip, options.gateway_host)
             gateway_server = GatewayServer(
                 config,
                 ServeOptions(
@@ -88,11 +97,19 @@ def serve_mcp(options: ServeMcpOptions) -> None:
                     workspace=workspace,
                     token=options.gateway_token,
                     use_token=options.gateway_use_token,
+                    extra_hosts=extra_hosts,
+                    freebind_hosts=_gateway_freebind_hosts(
+                        gateway_host,
+                        extra_hosts=extra_hosts,
+                        matchlock_gateway_ip=matchlock_gateway_ip,
+                    ),
                 ),
             ).start()
             gateway_file = gateway_server.gateway_file
             print("maco gateway started")
             print(f"  URL: {gateway_server.url}")
+            for url in gateway_server.extra_urls:
+                print(f"  extra URL: {url}")
             print(f"  gateway file: {gateway_file}")
         gateway = GatewayInfo.from_file(gateway_file)
         tools_by_server = fetch_gateway_tools(gateway.url, token=gateway.token)
@@ -118,7 +135,7 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             docker_gateway_host=options.docker_gateway_host,
             matchlock_binary=options.matchlock_binary,
             matchlock_gateway_host=options.matchlock_gateway_host,
-            matchlock_gateway_ip=options.matchlock_gateway_ip,
+            matchlock_gateway_ip=matchlock_gateway_ip,
             matchlock_extra_allow_hosts=list(options.matchlock_allow_host),
         )
         provider.start()
@@ -291,7 +308,61 @@ def _content_addressed_script_filename(code: str) -> str:
 
 
 def _default_gateway_host(provider: str) -> str:
-    return "0.0.0.0" if provider.replace("_", "-").lower() in {"docker", "matchlock"} else "127.0.0.1"
+    return "0.0.0.0" if _normalize_provider(provider) == "docker" else "127.0.0.1"
+
+
+def _normalize_provider(provider: str) -> str:
+    return provider.replace("_", "-").lower()
+
+
+def _matchlock_gateway_ip(
+    configured_ip: str | None,
+    *,
+    managed_gateway: bool,
+    gateway_file: Path,
+) -> str | None:
+    if configured_ip:
+        return configured_ip
+    if managed_gateway:
+        return DEFAULT_MATCHLOCK_GATEWAY_IP
+    try:
+        gateway = GatewayInfo.from_file(gateway_file)
+    except Exception:
+        return None
+    host = _url_host(gateway.url)
+    if host == DEFAULT_MATCHLOCK_GATEWAY_IP:
+        return DEFAULT_MATCHLOCK_GATEWAY_IP
+    return None
+
+
+def _gateway_extra_hosts(
+    provider: str,
+    matchlock_gateway_ip: str | None,
+    explicit_gateway_host: str | None,
+) -> tuple[str, ...]:
+    if provider != "matchlock" or not matchlock_gateway_ip:
+        return ()
+    if explicit_gateway_host and explicit_gateway_host not in {"127.0.0.1", "localhost", "::1"}:
+        return ()
+    return (matchlock_gateway_ip,)
+
+
+def _gateway_freebind_hosts(
+    gateway_host: str,
+    *,
+    extra_hosts: tuple[str, ...],
+    matchlock_gateway_ip: str | None,
+) -> tuple[str, ...]:
+    hosts = list(extra_hosts)
+    if matchlock_gateway_ip and gateway_host == matchlock_gateway_ip:
+        hosts.append(gateway_host)
+    return tuple(dict.fromkeys(hosts))
+
+
+def _url_host(url: str) -> str | None:
+    from urllib.parse import urlsplit
+
+    return urlsplit(url).hostname
 
 
 def _result_payload(result: SandboxRunResult) -> dict[str, Any]:

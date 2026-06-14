@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import shlex
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from ..core import SANDBOX_SDK_ROOT, SandboxContext, SandboxError, SandboxExec, SandboxRunResult, translate_loopback_url
 from .base import RemoteSandboxProvider
@@ -38,7 +38,11 @@ class MatchlockSandboxProvider(RemoteSandboxProvider):
         if self.client is not None:
             return
         Client, Config, Sandbox = _load_matchlock_sdk()
-        self.gateway_url = translate_loopback_url(self.context.gateway.url, self.gateway_host)
+        self.gateway_url = _matchlock_gateway_url(
+            self.context.gateway.url,
+            gateway_host=self.gateway_host,
+            gateway_ip=self.gateway_ip,
+        )
         env = self._guest_env({}, gateway_url=self.gateway_url)
         gateway_policy_host = _url_host(self.gateway_url) or self.gateway_host
         self.gateway_mapping = (gateway_policy_host, self.gateway_ip) if self.gateway_ip else None
@@ -170,6 +174,21 @@ def _sdk_command_summary(
 
 def _url_host(url: str) -> str | None:
     return urlsplit(url).hostname
+
+
+def _matchlock_gateway_url(url: str, *, gateway_host: str, gateway_ip: str | None) -> str:
+    translated = translate_loopback_url(url, gateway_host)
+    if gateway_ip and _url_host(translated) in {gateway_ip, "0.0.0.0"}:
+        return _replace_url_host(translated, gateway_host)
+    return translated
+
+
+def _replace_url_host(url: str, host: str) -> str:
+    parts = urlsplit(url)
+    netloc = host
+    if parts.port is not None:
+        netloc = f"{host}:{parts.port}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
 
 
 def _load_matchlock_sdk() -> tuple[type[Any], type[Any], type[Any]]:

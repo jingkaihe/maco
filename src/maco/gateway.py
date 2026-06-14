@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import secrets
 import signal
+import socket
 import sys
 import threading
 import time
@@ -28,6 +29,8 @@ class ServeOptions:
     workspace: str | Path = ".maco"
     token: str | None = None
     use_token: bool = True
+    extra_hosts: tuple[str, ...] = ()
+    freebind_hosts: tuple[str, ...] = ()
 
 
 class ManagerLoop:
@@ -98,37 +101,69 @@ class GatewayServer:
             self.token = secrets.token_urlsafe(32)
         self.manager_loop = ManagerLoop(config)
         self.httpd: ThreadingHTTPServer | None = None
+        self.extra_httpds: list[ThreadingHTTPServer] = []
         self.thread: threading.Thread | None = None
+        self.extra_threads: list[threading.Thread] = []
         self.url = ""
+        self.extra_urls: list[str] = []
 
     def start(self) -> GatewayServer:
         self.workspace.mkdir(parents=True, exist_ok=True)
         self.manager_loop.start()
         try:
             handler_cls = _make_handler(self.manager_loop, self.token)
-            self.httpd = ThreadingHTTPServer((self.options.host, self.options.port), handler_cls)
+            freebind_hosts = set(self.options.freebind_hosts)
+            self.httpd = _make_http_server(
+                self.options.host,
+                self.options.port,
+                handler_cls,
+                freebind=self.options.host in freebind_hosts,
+            )
             actual_host, actual_port = self.httpd.server_address[:2]
             display_host = "127.0.0.1" if actual_host in {"0.0.0.0", ""} else actual_host
             self.url = f"http://{display_host}:{actual_port}/"
             self.thread = threading.Thread(target=self.httpd.serve_forever, name="maco-gateway", daemon=True)
             self.thread.start()
+            for index, host in enumerate(dict.fromkeys(self.options.extra_hosts)):
+                if host == self.options.host:
+                    continue
+                extra_httpd = _make_http_server(
+                    host,
+                    actual_port,
+                    handler_cls,
+                    freebind=host in freebind_hosts,
+                )
+                extra_host, extra_port = extra_httpd.server_address[:2]
+                extra_display_host = "127.0.0.1" if extra_host in {"0.0.0.0", ""} else extra_host
+                self.extra_httpds.append(extra_httpd)
+                self.extra_urls.append(f"http://{extra_display_host}:{extra_port}/")
+                thread = threading.Thread(
+                    target=extra_httpd.serve_forever,
+                    name=f"maco-gateway-extra-{index}",
+                    daemon=True,
+                )
+                thread.start()
+                self.extra_threads.append(thread)
             _write_gateway_file(self.gateway_file, self.url, self.token, self.config.path)
         except Exception:
-            if self.httpd is not None:
-                if self.thread is not None and self.thread.is_alive():
-                    self.httpd.shutdown()
-                    self.thread.join(timeout=10)
-                self.httpd.server_close()
+            for httpd, thread in [(self.httpd, self.thread), *zip(self.extra_httpds, self.extra_threads)]:
+                if httpd is not None:
+                    if thread is not None and thread.is_alive():
+                        httpd.shutdown()
+                        thread.join(timeout=10)
+                    httpd.server_close()
             self.manager_loop.stop()
             raise
         return self
 
     def stop(self) -> None:
-        if self.httpd is not None:
-            self.httpd.shutdown()
-            self.httpd.server_close()
-        if self.thread is not None:
-            self.thread.join(timeout=10)
+        for httpd in [self.httpd, *self.extra_httpds]:
+            if httpd is not None:
+                httpd.shutdown()
+                httpd.server_close()
+        for thread in [self.thread, *self.extra_threads]:
+            if thread is not None:
+                thread.join(timeout=10)
         self.manager_loop.stop()
 
 
@@ -168,6 +203,32 @@ def _write_gateway_file(path: Path, url: str, token: str | None, config_path: Pa
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _make_http_server(
+    host: str,
+    port: int,
+    handler_cls: type[BaseHTTPRequestHandler],
+    *,
+    freebind: bool = False,
+) -> ThreadingHTTPServer:
+    httpd = ThreadingHTTPServer((host, port), handler_cls, bind_and_activate=False)
+    try:
+        if freebind:
+            _enable_freebind(httpd.socket)
+        httpd.server_bind()
+        httpd.server_activate()
+    except Exception:
+        httpd.server_close()
+        raise
+    return httpd
+
+
+def _enable_freebind(sock: socket.socket) -> None:
+    if not sys.platform.startswith("linux"):
+        return
+    ip_freebind = getattr(socket, "IP_FREEBIND", 15)
+    sock.setsockopt(socket.SOL_IP, ip_freebind, 1)
 
 
 def _make_handler(manager_loop: ManagerLoop, token: str | None) -> type[BaseHTTPRequestHandler]:

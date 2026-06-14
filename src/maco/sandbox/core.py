@@ -15,6 +15,7 @@ class SandboxError(RuntimeError):
 
 
 DEFAULT_SANDBOX_IMAGE = "ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine"
+DEFAULT_MATCHLOCK_GATEWAY_IP = "192.168.100.1"
 SANDBOX_SDK_ROOT = "/workspace/macosdk"
 SANDBOX_TOOLS_ROOT = f"{SANDBOX_SDK_ROOT}/tools"
 

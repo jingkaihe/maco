@@ -83,7 +83,11 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
     )
     command.add_argument(
         "--gateway-host",
-        help="host for the managed gateway started by serve-mcp (default: 127.0.0.1, or 0.0.0.0 for docker/matchlock)",
+        help=(
+            "host for the managed gateway started by serve-mcp "
+            "(default: 127.0.0.1, or 0.0.0.0 for docker; "
+            "matchlock also binds 192.168.100.1)"
+        ),
     )
     command.add_argument(
         "--gateway-port",
@@ -120,7 +124,7 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
     )
     command.add_argument(
         "--matchlock-gateway-ip",
-        help="optional IP for --add-host <gateway-host>:<ip> inside matchlock",
+        help="IP for --add-host <gateway-host>:<ip> inside matchlock (default: 192.168.100.1 for managed gateways)",
     )
     command.add_argument(
         "--matchlock-allow-host",

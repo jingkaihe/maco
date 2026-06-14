@@ -1,6 +1,7 @@
 """Sandbox providers for maco serve-mcp execution."""
 
 from .core import (
+    DEFAULT_MATCHLOCK_GATEWAY_IP,
     DEFAULT_SANDBOX_IMAGE,
     GatewayInfo,
     SANDBOX_SDK_ROOT,
@@ -21,6 +22,7 @@ from .providers.matchlock import MatchlockSandboxProvider
 
 __all__ = [
     "DEFAULT_SANDBOX_IMAGE",
+    "DEFAULT_MATCHLOCK_GATEWAY_IP",
     "DockerSandboxProvider",
     "GatewayInfo",
     "LocalSandboxProvider",

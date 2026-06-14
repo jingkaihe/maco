@@ -41,19 +41,14 @@ export GITHUB_PERSONAL_ACCESS_TOKEN=$(gh auth token)
 
 ## 1. Start `maco serve-mcp`
 
-From the repository root:
+The short path is to run from this example directory so the defaults line up with the local files:
 
 ```bash
-uv run maco serve-mcp \
-  --config examples/serve-mcp/mcp.json \
-  --workspace examples/serve-mcp/.maco \
-  --scratch examples/serve-mcp/scratch \
-  --clean \
-  --provider local \
-  --port 8789
+cd examples/serve-mcp
+uv run maco serve-mcp --provider local
 ```
 
-That one command generates wrappers, writes `examples/serve-mcp/.maco/gateway.json`, starts the gateway, and serves HTTP MCP at `http://127.0.0.1:8789/mcp`.
+This uses `mcp.json`, writes `.maco/gateway.json`, uses `maco-serve-mcp/` as scratch, starts the gateway, and serves HTTP MCP at `http://127.0.0.1:8789/mcp`. Add `--clean` only when you want to recreate the local generated SDK from scratch.
 
 Inside the MCP client, use the `bash` tool to inspect the generated sandbox SDK progressively:
 
@@ -63,39 +58,14 @@ sed -n '1,160p' /workspace/macosdk/tools/playwright/__init__.py
 sed -n '1,160p' /workspace/macosdk/tools/github/__init__.py
 ```
 
-For Docker sandbox execution, use the Docker provider. `serve-mcp` automatically binds its managed gateway on a host address reachable from the container:
+To use a different sandbox provider, swap the provider name:
 
 ```bash
-uv run maco serve-mcp \
-  --config examples/serve-mcp/mcp.json \
-  --workspace examples/serve-mcp/.maco \
-  --scratch examples/serve-mcp/scratch \
-  --clean \
-  --provider docker \
-  --port 8789
+uv run maco serve-mcp --provider docker
+uv run maco serve-mcp --provider matchlock
 ```
 
-For Matchlock, import the sandbox image once:
-
-```bash
-docker save ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine \
-  | matchlock image import ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine
-```
-
-Then run `maco serve-mcp` with the Matchlock provider:
-
-```bash
-uv run maco serve-mcp \
-  --config examples/serve-mcp/mcp.json \
-  --workspace examples/serve-mcp/.maco \
-  --scratch examples/serve-mcp/scratch \
-  --clean \
-  --provider matchlock \
-  --matchlock-gateway-ip 192.168.100.1 \
-  --port 8789
-```
-
-If you prefer to manage the maco gateway separately, run `maco serve` yourself and pass `--gateway-file examples/serve-mcp/.maco/gateway.json` to `maco serve-mcp`.
+If you prefer to manage the maco gateway separately, run `uv run maco serve` yourself and pass `--gateway-file .maco/gateway.json` to `maco serve-mcp`.
 
 ## 2. Connect an MCP client
 
@@ -118,4 +88,4 @@ The client will see only two tools, `bash` and `code_execute`, but those tools c
 
 - Prefer calling `code_execute` with only the `code` argument. If `filename` is omitted, maco writes the script to a deterministic `<hash>.py` file in scratch.
 - The Docker and Matchlock providers use the default sandbox image `ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine`, which includes Python 3.12, `uv`, `pydantic`, `rg`, and `fd`.
-- `examples/serve-mcp/.maco/` and `examples/serve-mcp/scratch/` are local runtime files and should not be committed.
+- `.maco/` and `maco-serve-mcp/` are local runtime files and should not be committed.

@@ -364,11 +364,6 @@ def _require_provider(provider: str) -> None:
 def _provider_args(provider: str) -> list[str]:
     if provider == "docker":
         return []
-    if provider == "matchlock":
-        return [
-            "--matchlock-gateway-ip",
-            "192.168.100.1",
-        ]
     return ["--python-command", "python"]
 
 
