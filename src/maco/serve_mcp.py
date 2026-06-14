@@ -136,6 +136,11 @@ def serve_mcp(options: ServeMcpOptions) -> None:
         if options.gateway_file is None:
             config = load_config(options.config)
             gateway_host = options.gateway_host or _default_gateway_host()
+            _validate_managed_gateway_bind(
+                normalized_provider,
+                explicit_gateway_host=options.gateway_host,
+                matchlock_gateway_ip=matchlock_gateway_ip,
+            )
             extra_hosts = _gateway_extra_hosts(
                 normalized_provider,
                 docker_gateway_ip=docker_gateway_ip,
@@ -370,6 +375,24 @@ def _content_addressed_script_filename(code: str) -> str:
 
 def _default_gateway_host() -> str:
     return "127.0.0.1"
+
+
+def _supports_freebind() -> bool:
+    return sys.platform.startswith("linux")
+
+
+def _validate_managed_gateway_bind(
+    provider: str,
+    *,
+    explicit_gateway_host: str | None,
+    matchlock_gateway_ip: str | None,
+) -> None:
+    if provider != "matchlock" or explicit_gateway_host or not matchlock_gateway_ip or _supports_freebind():
+        return
+    raise ValueError(
+        "matchlock managed gateway requires an explicit --gateway-host on this platform; "
+        "use --gateway-host 0.0.0.0 to expose the gateway to the sandbox, or pass --gateway-file"
+    )
 
 
 def _normalize_provider(provider: str) -> str:

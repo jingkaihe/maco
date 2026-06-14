@@ -22,6 +22,7 @@ from maco.serve_mcp import (
     _matchlock_gateway_ip,
     _mcp_instructions,
     _result_payload,
+    _validate_managed_gateway_bind,
     create_serve_mcp_app,
 )
 
@@ -155,6 +156,33 @@ def test_matchlock_managed_gateway_defaults_to_local_bind_plus_gateway_extra_hos
         matchlock_gateway_ip=gateway_ip,
         explicit_gateway_host=None,
     ) == ("192.168.100.1",)
+
+
+def test_matchlock_managed_gateway_requires_explicit_gateway_host_without_freebind(monkeypatch):
+    monkeypatch.setattr(serve_mcp_module, "_supports_freebind", lambda: False)
+
+    with pytest.raises(ValueError, match="--gateway-host 0.0.0.0"):
+        _validate_managed_gateway_bind(
+            "matchlock",
+            explicit_gateway_host=None,
+            matchlock_gateway_ip="192.168.100.1",
+        )
+
+    _validate_managed_gateway_bind(
+        "matchlock",
+        explicit_gateway_host="0.0.0.0",
+        matchlock_gateway_ip="192.168.100.1",
+    )
+
+
+def test_matchlock_managed_gateway_can_use_default_bind_with_freebind(monkeypatch):
+    monkeypatch.setattr(serve_mcp_module, "_supports_freebind", lambda: True)
+
+    _validate_managed_gateway_bind(
+        "matchlock",
+        explicit_gateway_host=None,
+        matchlock_gateway_ip="192.168.100.1",
+    )
 
 
 def test_matchlock_external_local_gateway_file_does_not_guess_gateway_ip(tmp_path):
