@@ -31,7 +31,7 @@ def get_version_info() -> VersionInfo:
 
 def _package_version() -> str:
     try:
-        return package_version("maco")
+        return package_version("mcp-as-code")
     except PackageNotFoundError:
         version_file = _find_ancestor_file("VERSION.txt")
         if version_file is not None:
