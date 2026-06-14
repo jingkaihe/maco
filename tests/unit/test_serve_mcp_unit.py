@@ -63,6 +63,21 @@ def test_serve_mcp_instructions_list_server_modules_and_rg_fd_discovery(tmp_path
     assert "PYTHONPATH" not in instructions
 
 
+def test_serve_mcp_instructions_include_all_server_modules(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    for index in range(55):
+        server_dir = context.workspace / "maco_generated" / "servers" / f"server{index:02d}"
+        server_dir.mkdir(parents=True)
+        (server_dir / "__init__.py").write_text("", encoding="utf-8")
+
+    instructions = _mcp_instructions(provider, context)
+
+    assert "..." not in instructions
+    assert "- server00: /workspace/.maco/maco_generated/servers/server00" in instructions
+    assert "- server54: /workspace/.maco/maco_generated/servers/server54" in instructions
+
+
 def test_code_execute_description_lists_server_modules(tmp_path):
     context = _context(tmp_path)
     provider = RecordingProvider()

@@ -193,25 +193,18 @@ def _code_execute_description(provider: SandboxProvider, context: SandboxContext
 def _render_model_text(template_name: str, provider: SandboxProvider, context: SandboxContext) -> str:
     wrapper_root = _guest_server_root(provider)
     return _TEMPLATES.get_template(template_name).render(
-        server_catalog_lines=_server_catalog_lines(context.workspace, wrapper_root=wrapper_root),
+        server_modules=_server_modules(context.workspace),
         wrapper_root=wrapper_root,
     ).strip()
 
 
-def _server_catalog_lines(workspace: Path, *, wrapper_root: str, limit: int = 50) -> list[str]:
+def _server_modules(workspace: Path) -> list[str]:
     server_root = workspace / "maco_generated" / "servers"
-    modules = sorted(
+    return sorted(
         path.name
         for path in server_root.iterdir()
         if path.is_dir() and (path / "__init__.py").exists()
     ) if server_root.exists() else []
-    if not modules:
-        return ["Available generated server modules: none found."]
-    lines = ["Available generated server modules:"]
-    lines.extend(f"- {module}: {wrapper_root}/{module}" for module in modules[:limit])
-    if len(modules) > limit:
-        lines.append(f"- ... {len(modules) - limit} more not shown")
-    return lines
 
 
 def _guest_server_root(provider: SandboxProvider) -> str:

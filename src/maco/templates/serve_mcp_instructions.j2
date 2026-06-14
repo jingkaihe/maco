@@ -3,9 +3,7 @@ Run shell and Python code in a sandbox with generated maco wrappers.
 Generated MCP wrappers are importable as:
   from maco_generated.servers.<server> import <tool>
 
-{% for line in server_catalog_lines -%}
-{{ line }}
-{% endfor %}
+{% include "server_catalog.j2" %}
 
 Inspect generated wrapper code inside the sandbox at:
   {{ wrapper_root }}/<server>/__init__.py

@@ -5,9 +5,7 @@ For most tasks, pass only the code argument. If filename is omitted, maco writes
 Import generated tools with:
   from maco_generated.servers.<server> import <tool>
 
-{% for line in server_catalog_lines -%}
-{{ line }}
-{% endfor %}
+{% include "server_catalog.j2" %}
 
 Inspect wrapper code at:
   {{ wrapper_root }}/<server>/__init__.py

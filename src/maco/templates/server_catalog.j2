@@ -1,0 +1,8 @@
+{% if server_modules -%}
+Available generated server modules:
+{% for module in server_modules -%}
+- {{ module }}: {{ wrapper_root }}/{{ module }}
+{% endfor -%}
+{% else -%}
+Available generated server modules: none found.
+{% endif -%}
