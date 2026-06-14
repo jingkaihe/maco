@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 
 from ..core import SandboxContext, SandboxExec, SandboxRunResult
 from .base import BaseSandboxProvider
@@ -40,4 +41,6 @@ class LocalSandboxProvider(BaseSandboxProvider):
             timeout=self._timeout(request),
             check=False,
         )
-        return SandboxRunResult(completed.returncode, completed.stdout, completed.stderr, command)
+        if self.context.debug:
+            print(f"maco local command: {command!r}", file=sys.stderr)
+        return SandboxRunResult(completed.returncode, completed.stdout, completed.stderr)

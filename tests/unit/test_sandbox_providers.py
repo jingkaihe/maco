@@ -185,8 +185,8 @@ def test_provider_factory_uses_default_sandbox_image(tmp_path):
     assert matchlock.image == DEFAULT_SANDBOX_IMAGE
 
 
-def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, monkeypatch):
-    context = _context(tmp_path)
+def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, monkeypatch, capsys):
+    context = _context(tmp_path, debug=True)
     provider = MatchlockSandboxProvider(
         context,
         image="maco-test:latest",
@@ -268,7 +268,7 @@ def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, mon
 
         def exec(self, command: str, *, working_dir: str, timeout: int) -> SandboxRunResult:
             captured.setdefault("execs", []).append((command, working_dir, timeout))
-            return SandboxRunResult(0, "ok", "", ["inner"])
+            return SandboxRunResult(0, "ok", "")
 
         def remove(self) -> None:
             captured["removed"] = True
@@ -303,11 +303,13 @@ def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, mon
     ]
     provider.stop()
     assert captured["removed"] is True
-    assert not any("secret-token" in part for part in result.command)
+    err = capsys.readouterr().err
+    assert "maco matchlock command:" in err
+    assert "secret-token" not in err
 
 
-def test_matchlock_provider_uses_explicit_gateway_ip_mapping(tmp_path, monkeypatch):
-    context = _context(tmp_path)
+def test_matchlock_provider_uses_explicit_gateway_ip_mapping(tmp_path, monkeypatch, capsys):
+    context = _context(tmp_path, debug=True)
     provider = MatchlockSandboxProvider(
         context,
         image="maco-test:latest",
@@ -374,13 +376,13 @@ def test_matchlock_provider_uses_explicit_gateway_ip_mapping(tmp_path, monkeypat
 
         def exec(self, command: str, *, working_dir: str, timeout: int) -> SandboxRunResult:
             captured.setdefault("execs", []).append((command, working_dir, timeout))
-            return SandboxRunResult(0, "ok", "", ["inner"])
+            return SandboxRunResult(0, "ok", "")
 
         def remove(self) -> None:
             pass
 
     monkeypatch.setattr(matchlock_provider, "_load_matchlock_sdk", lambda: (FakeClient, FakeConfig, FakeSandbox))
-    result = provider.run(SandboxExec(command="true"))
+    provider.run(SandboxExec(command="true"))
 
     assert captured["spec"].added_hosts == [("maco-gateway.internal", "192.0.2.10")]
     assert captured["spec"].allowed == []
@@ -389,7 +391,7 @@ def test_matchlock_provider_uses_explicit_gateway_ip_mapping(tmp_path, monkeypat
         ("maco sandbox-bootstrap --workspace /workspace/macosdk", "/workspace", context.timeout),
         ("true", "/workspace", context.timeout),
     ]
-    assert "hosts=192.0.2.10:maco-gateway.internal" in result.command
+    assert "hosts=192.0.2.10:maco-gateway.internal" in capsys.readouterr().err
 
 
 def test_write_code_file_and_guest_path_are_constrained(tmp_path):
@@ -402,7 +404,7 @@ def test_write_code_file_and_guest_path_are_constrained(tmp_path):
         write_code_file(scratch, "../escape.py", "")
 
 
-def _context(tmp_path: Path) -> SandboxContext:
+def _context(tmp_path: Path, *, debug: bool = False) -> SandboxContext:
     workspace = tmp_path / ".maco"
     (workspace / "maco_generated").mkdir(parents=True)
     (workspace / "maco_generated" / "client.py").write_text("", encoding="utf-8")
@@ -414,6 +416,7 @@ def _context(tmp_path: Path) -> SandboxContext:
         workspace=workspace.resolve(),
         scratch=(tmp_path / "scratch").resolve(),
         gateway=GatewayInfo.from_file(workspace / "gateway.json"),
+        debug=debug,
     )
 
 

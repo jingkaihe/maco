@@ -105,6 +105,11 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
     command.add_argument("--port", default=8789, type=int, help="HTTP MCP bind port")
     command.add_argument("--timeout", default=60, type=int, help="default command timeout in seconds")
     command.add_argument(
+        "--debug",
+        action="store_true",
+        help="log provider command summaries to server stderr",
+    )
+    command.add_argument(
         "--image",
         help=f"container image for docker/matchlock providers (default: {DEFAULT_SANDBOX_IMAGE})",
     )
@@ -217,6 +222,7 @@ def _cmd_serve_mcp(args: argparse.Namespace) -> int:
             host=args.host,
             port=args.port,
             timeout=args.timeout,
+            debug=args.debug,
             image=args.image,
             python_command=args.python_command,
             docker_binary=args.docker_binary,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+import sys
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -117,19 +118,20 @@ class MatchlockSandboxProvider(RemoteSandboxProvider):
             working_dir=self.guest_scratch,
             timeout=self._timeout(request),
         )
-        return SandboxRunResult(
-            result.exit_code,
-            result.stdout,
-            result.stderr,
-            _sdk_command_summary(
+        if self.context.debug:
+            summary = _sdk_command_summary(
                 self.matchlock_binary,
                 self.image,
                 request.command,
                 gateway_url=self.gateway_url,
                 allowed_hosts=sorted(set(self.allowed_hosts)),
                 gateway_mapping=self.gateway_mapping,
-            ),
-        )
+            )
+            print(
+                f"maco matchlock command: {summary!r}",
+                file=sys.stderr,
+            )
+        return SandboxRunResult(result.exit_code, result.stdout, result.stderr)
 
     def write_file(self, relative_path: str, content: str) -> str:
         self.start()
@@ -164,7 +166,7 @@ def _sdk_command_summary(
     allowed_hosts: list[str],
     gateway_mapping: tuple[str, str] | None = None,
 ) -> list[str]:
-    """Return a non-secret summary for debugging/API responses."""
+    """Return a non-secret summary for debug logs."""
 
     summary: list[str] = [
         binary,

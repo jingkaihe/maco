@@ -67,7 +67,6 @@ class SandboxRunResult:
     exit_code: int
     stdout: str
     stderr: str
-    command: list[str]
 
     @property
     def ok(self) -> bool:
@@ -83,6 +82,7 @@ class SandboxContext:
     gateway: GatewayInfo
     timeout: int = 60
     python_command: str | None = None
+    debug: bool = False
 
 
 @dataclass(frozen=True)
@@ -208,6 +208,7 @@ def normalize_context(context: SandboxContext) -> SandboxContext:
         gateway=context.gateway,
         timeout=context.timeout,
         python_command=context.python_command,
+        debug=context.debug,
     )
 
 

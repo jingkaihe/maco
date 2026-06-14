@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 import subprocess
+import sys
 from urllib.parse import urlsplit, urlunsplit
 
 from ..core import (
@@ -115,7 +116,9 @@ class DockerSandboxProvider(RemoteSandboxProvider):
             timeout=self._timeout(request),
             check=False,
         )
-        return SandboxRunResult(completed.returncode, completed.stdout, completed.stderr, self._command_summary(command))
+        if self.context.debug:
+            print(f"maco docker command: {self._command_summary(command)!r}", file=sys.stderr)
+        return SandboxRunResult(completed.returncode, completed.stdout, completed.stderr)
 
     def write_file(self, relative_path: str, content: str) -> str:
         self.start()

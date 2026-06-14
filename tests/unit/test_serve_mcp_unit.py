@@ -21,6 +21,7 @@ from maco.serve_mcp import (
     _is_docker_desktop,
     _matchlock_gateway_ip,
     _mcp_instructions,
+    _result_payload,
     create_serve_mcp_app,
 )
 
@@ -52,6 +53,12 @@ def test_serve_mcp_code_execute_omitted_filename_uses_deterministic_path(tmp_pat
     assert re.fullmatch(r"[0-9a-f]{16}\.py", relative)
     assert provider.writes == [(relative, code)]
     assert provider.requests[0].command == f"python /workspace/{relative}"
+
+
+def test_result_payload_contains_only_tool_output_fields():
+    payload = _result_payload(SandboxRunResult(0, "out", ""))
+
+    assert payload == {"ok": True, "exit_code": 0, "stdout": "out", "stderr": ""}
 
 
 def test_serve_mcp_instructions_list_server_modules_and_rg_fd_discovery(tmp_path):
@@ -287,7 +294,7 @@ class RecordingProvider:
 
     def run(self, request: SandboxExec) -> SandboxRunResult:
         self.requests.append(request)
-        return SandboxRunResult(0, "", "", ["recorded"])
+        return SandboxRunResult(0, "", "")
 
     def python_script_command(self, guest_script_path: str, args: list[str]) -> str:
         return " ".join(["python", guest_script_path, *args])

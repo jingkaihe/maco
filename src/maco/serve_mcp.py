@@ -53,6 +53,7 @@ class ServeMcpOptions:
     host: str = "127.0.0.1"
     port: int = 8789
     timeout: int = 60
+    debug: bool = False
     image: str | None = None
     python_command: str | None = None
     docker_binary: str = "docker"
@@ -149,6 +150,7 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             gateway=gateway,
             timeout=options.timeout,
             python_command=options.python_command,
+            debug=options.debug,
         )
         provider = provider_from_name(
             options.provider,
@@ -488,5 +490,4 @@ def _result_payload(result: SandboxRunResult) -> dict[str, Any]:
         "exit_code": result.exit_code,
         "stdout": result.stdout,
         "stderr": result.stderr,
-        "command": result.command,
     }
