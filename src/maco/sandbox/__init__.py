@@ -3,6 +3,8 @@
 from .core import (
     DEFAULT_SANDBOX_IMAGE,
     GatewayInfo,
+    SANDBOX_SDK_ROOT,
+    SANDBOX_TOOLS_ROOT,
     SandboxContext,
     SandboxError,
     SandboxExec,
@@ -23,6 +25,8 @@ __all__ = [
     "GatewayInfo",
     "LocalSandboxProvider",
     "MatchlockSandboxProvider",
+    "SANDBOX_SDK_ROOT",
+    "SANDBOX_TOOLS_ROOT",
     "SandboxContext",
     "SandboxError",
     "SandboxExec",

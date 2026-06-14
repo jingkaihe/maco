@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
+from maco.codegen import generate_sandbox_sdk
 from maco.sandbox import (
     DEFAULT_SANDBOX_IMAGE,
     DockerSandboxProvider,
@@ -65,7 +66,7 @@ import json
 import os
 import urllib.request
 
-import maco_generated
+from tools.echoServer import echo
 
 request = urllib.request.Request(
     os.environ["MACO_GATEWAY_URL"] + "health",
@@ -77,7 +78,7 @@ with urllib.request.urlopen(request, timeout=5) as response:
 print(json.dumps({
     "gateway_url": os.environ["MACO_GATEWAY_URL"],
     "workspace": os.environ["MACO_WORKSPACE"],
-    "py_path_ok": maco_generated.VALUE == "generated-ok",
+    "tool_result": echo(message="sandbox-smoke").result,
     "health": health,
 }, sort_keys=True))
 '''
@@ -90,16 +91,14 @@ def _assert_smoke(result: Any, *, expected_gateway_url: str) -> None:
     assert lines, result.stdout
     payload = json.loads(lines[-1])
     assert payload["gateway_url"] == expected_gateway_url
-    assert payload["py_path_ok"] is True
+    assert payload["workspace"].endswith("macosdk") or payload["workspace"].endswith(".maco")
+    assert payload["tool_result"] == "sandbox-smoke"
     assert payload["health"] == {"ok": True}
 
 
 def _context(tmp_path: Path, gateway_url: str, token: str) -> SandboxContext:
     workspace = tmp_path / ".maco"
-    generated = workspace / "maco_generated"
-    generated.mkdir(parents=True)
-    (generated / "client.py").write_text("", encoding="utf-8")
-    (generated / "__init__.py").write_text('VALUE = "generated-ok"\n', encoding="utf-8")
+    generate_sandbox_sdk(_echo_catalog(), workspace=workspace)
     (workspace / "gateway.json").write_text(
         json.dumps({"url": gateway_url, "token": token}),
         encoding="utf-8",
@@ -150,11 +149,56 @@ class _GatewayHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"ok": True}).encode("utf-8"))
             return
+        if self.path.rstrip("/") == "/tools":
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(
+                json.dumps({"servers": _echo_catalog()}).encode("utf-8")
+            )
+            return
         self.send_response(HTTPStatus.NOT_FOUND)
         self.end_headers()
 
+    def do_POST(self) -> None:  # noqa: N802 - stdlib API
+        if self.headers.get("Authorization") != f"Bearer {TOKEN}":
+            self.send_response(HTTPStatus.UNAUTHORIZED)
+            self.end_headers()
+            return
+        length = int(self.headers.get("Content-Length") or "0")
+        request = json.loads(self.rfile.read(length).decode("utf-8"))
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(
+            json.dumps({"structuredContent": {"result": request.get("arguments", {}).get("message")}}).encode(
+                "utf-8"
+            )
+        )
+
     def log_message(self, format: str, *args: Any) -> None:
         return
+
+
+def _echo_catalog() -> dict[str, list[dict[str, Any]]]:
+    return {
+        "echo-server": [
+            {
+                "name": "echo",
+                "description": "Echo a message",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["message"],
+                    "properties": {"message": {"type": "string"}},
+                },
+                "outputSchema": {
+                    "type": "object",
+                    "required": ["result"],
+                    "properties": {"result": {"type": "string"}},
+                },
+            }
+        ]
+    }
 
 
 def _guest_url(url: str, host: str) -> str:

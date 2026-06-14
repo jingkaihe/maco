@@ -5,12 +5,22 @@ on:
     paths:
       - ".github/workflows/sandbox-image.yml"
       - "images/sandbox/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "README.md"
+      - "LICENSE"
   push:
     branches:
       - main
     paths:
       - ".github/workflows/sandbox-image.yml"
       - "images/sandbox/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - "README.md"
+      - "LICENSE"
   workflow_dispatch:
 
 permissions:
@@ -54,7 +64,7 @@ jobs:
       - name: Build and optionally push image
         uses: docker/build-push-action@v6
         with:
-          context: images/sandbox
+          context: .
           file: images/sandbox/Dockerfile
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}

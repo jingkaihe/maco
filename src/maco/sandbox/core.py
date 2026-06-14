@@ -15,6 +15,8 @@ class SandboxError(RuntimeError):
 
 
 DEFAULT_SANDBOX_IMAGE = "ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine"
+SANDBOX_SDK_ROOT = "/workspace/macosdk"
+SANDBOX_TOOLS_ROOT = f"{SANDBOX_SDK_ROOT}/tools"
 
 
 @dataclass(frozen=True)
@@ -82,8 +84,17 @@ class SandboxProvider(Protocol):
     guest_workspace: str
     guest_scratch: str
 
+    def start(self) -> None:
+        """Start or bootstrap provider resources."""
+
+    def stop(self) -> None:
+        """Release provider resources."""
+
     def run(self, request: SandboxExec) -> SandboxRunResult:
         """Run a non-interactive command in the sandbox."""
+
+    def write_file(self, relative_path: str, content: str) -> str:
+        """Write a file inside sandbox scratch and return its guest path."""
 
     def python_script_command(self, guest_script_path: str, args: list[str]) -> str:
         """Build the shell command used by code_execute for a guest script."""
@@ -172,10 +183,6 @@ def translate_loopback_url(url: str, host: str) -> str:
 def normalize_context(context: SandboxContext) -> SandboxContext:
     workspace = context.workspace.expanduser().resolve()
     scratch = context.scratch.expanduser().resolve()
-    if not (workspace / "maco_generated" / "client.py").exists():
-        raise SandboxError(
-            f"{workspace} does not look like a generated maco workspace; run `maco gen` or `maco serve` first"
-        )
     scratch.mkdir(parents=True, exist_ok=True)
     return SandboxContext(
         workspace=workspace,

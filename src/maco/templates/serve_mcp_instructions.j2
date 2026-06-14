@@ -1,11 +1,11 @@
-Run shell and Python code in a sandbox with generated maco wrappers.
+Run shell and Python code in a sandbox with generated maco tools.
 
-Generated MCP wrappers are importable as:
-  from maco_generated.servers.<server> import <tool>
+Generated MCP tools are importable as:
+  from tools.<server> import <tool>
 
 {% include "server_catalog.j2" %}
 
-Inspect generated wrapper code inside the sandbox at:
+Inspect generated tool code inside the sandbox at:
   {{ wrapper_root }}/<server>/__init__.py
   {{ wrapper_root }}/<server>/<tool>.py
 
@@ -14,4 +14,4 @@ Use bash for discovery with rg/fd:
   fd . {{ wrapper_root }} -t f
   rg "^def " {{ wrapper_root }}/<server>
 
-Use code_execute to run Python scripts that import generated wrappers.
+Use code_execute to run Python scripts that import generated tools.

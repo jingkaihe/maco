@@ -1,9 +1,18 @@
 FROM ghcr.io/astral-sh/uv:0.11.21-python3.12-alpine
 
+WORKDIR /build
+
 RUN apk add --no-cache \
     fd \
-    ripgrep \
-    && UV_NO_CACHE=1 uv pip install --system 'pydantic>=2.0'
+    ripgrep
+
+COPY pyproject.toml uv.lock README.md LICENSE ./
+COPY src ./src
+
+RUN UV_NO_CACHE=1 uv pip install --system . \
+    && rm -rf /build
+
+WORKDIR /workspace
 
 # Matchlock's SDK launches the image command before running exec requests.
 # The upstream uv image defaults to `uv`, which exits with usage status when no

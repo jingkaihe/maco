@@ -6,7 +6,7 @@ import typing as _t
 
 from pydantic import BaseModel, ConfigDict, Field, RootModel
 
-from maco_generated.client import call_mcp_tool
+from {{ client_module }} import call_mcp_tool
 
 
 SERVER_NAME = {{ server_name | pyrepr }}
@@ -36,4 +36,3 @@ def {{ func_name }}(arguments: {{ input_type_expr }} | dict[str, _t.Any] | None 
 {% endif %}
     result = call_mcp_tool(SERVER_NAME, TOOL_NAME, payload)
     return {{ return_expr }}
-

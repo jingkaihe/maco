@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from dataclasses import dataclass
 import json
 import os
@@ -36,14 +37,21 @@ class ManagerLoop:
         self.manager = MCPManager(config)
         self.loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run, name="maco-mcp-loop", daemon=True)
+        self._ready: concurrent.futures.Future[None] = concurrent.futures.Future()
+        self._main_future: concurrent.futures.Future[None] | None = None
+        self._stop_event: asyncio.Event | None = None
 
     def start(self) -> None:
         self._thread.start()
-        self.run(self.manager.start())
+        self._main_future = asyncio.run_coroutine_threadsafe(self._main(), self.loop)
+        self._ready.result()
 
     def stop(self) -> None:
         try:
-            self.run(self.manager.aclose(), timeout=10)
+            if self._stop_event is not None:
+                self.loop.call_soon_threadsafe(self._stop_event.set)
+            if self._main_future is not None:
+                self._main_future.result(timeout=10)
         finally:
             self.loop.call_soon_threadsafe(self.loop.stop)
             self._thread.join(timeout=10)
@@ -62,6 +70,19 @@ class ManagerLoop:
     def _run(self) -> None:
         asyncio.set_event_loop(self.loop)
         self.loop.run_forever()
+
+    async def _main(self) -> None:
+        try:
+            await self.manager.start()
+            self._stop_event = asyncio.Event()
+            self._ready.set_result(None)
+            await self._stop_event.wait()
+        except Exception as exc:
+            if not self._ready.done():
+                self._ready.set_exception(exc)
+            raise
+        finally:
+            await self.manager.aclose()
 
 
 class GatewayServer:
@@ -158,6 +179,9 @@ def _make_handler(manager_loop: ManagerLoop, token: str | None) -> type[BaseHTTP
                 self._write_json({"ok": True, "servers": manager_loop.manager.server_names()})
                 return
             if self.path.rstrip("/") == "/tools":
+                if token and self.headers.get("Authorization") != f"Bearer {token}":
+                    self._write_error(HTTPStatus.UNAUTHORIZED, "unauthorized")
+                    return
                 try:
                     self._write_json({"servers": manager_loop.list_tools()})
                 except Exception as exc:  # pragma: no cover - defensive gateway path

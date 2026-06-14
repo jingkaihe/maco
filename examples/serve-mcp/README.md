@@ -55,12 +55,12 @@ uv run maco serve-mcp \
 
 That one command generates wrappers, writes `examples/serve-mcp/.maco/gateway.json`, starts the gateway, and serves HTTP MCP at `http://127.0.0.1:8789/mcp`.
 
-Inspect the generated wrappers progressively:
+Inside the MCP client, use the `bash` tool to inspect the generated sandbox SDK progressively:
 
 ```bash
-rg --files examples/serve-mcp/.maco/maco_generated/servers
-sed -n '1,160p' examples/serve-mcp/.maco/maco_generated/servers/playwright/__init__.py
-sed -n '1,160p' examples/serve-mcp/.maco/maco_generated/servers/github/__init__.py
+rg --files /workspace/macosdk/tools
+sed -n '1,160p' /workspace/macosdk/tools/playwright/__init__.py
+sed -n '1,160p' /workspace/macosdk/tools/github/__init__.py
 ```
 
 For Docker sandbox execution, use the Docker provider. `serve-mcp` automatically binds its managed gateway on a host address reachable from the container:
@@ -112,7 +112,7 @@ Configure your MCP client with `examples/serve-mcp/mcp-client.json`:
 }
 ```
 
-The client will see only two tools, `bash` and `code_execute`, but those tools can use all generated wrappers for Playwright and GitHub.
+The client will see only two tools, `bash` and `code_execute`, but those tools can use all generated wrappers for Playwright and GitHub. Code executed in the sandbox imports generated tools with `from tools.<server> import <tool>`.
 
 ## Notes
 

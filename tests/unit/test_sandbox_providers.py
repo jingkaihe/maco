@@ -55,7 +55,7 @@ def test_local_provider_injects_gateway_and_pythonpath(tmp_path):
     ]
 
 
-def test_docker_provider_builds_guest_reachable_gateway_command(tmp_path, monkeypatch):
+def test_docker_provider_bootstraps_and_execs_without_host_sdk_mounts(tmp_path, monkeypatch):
     context = _context(tmp_path)
     provider = DockerSandboxProvider(
         context,
@@ -63,11 +63,12 @@ def test_docker_provider_builds_guest_reachable_gateway_command(tmp_path, monkey
         docker_binary="docker-test",
         gateway_host="host.docker.internal",
     )
-    captured: dict[str, Any] = {}
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        captured["command"] = command
-        captured["kwargs"] = kwargs
+        calls.append((command, kwargs))
+        if command[:3] == ["docker-test", "run", "-d"]:
+            return subprocess.CompletedProcess(command, 0, stdout="container-123\n", stderr="")
         return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
 
     monkeypatch.setattr(docker_provider.subprocess, "run", fake_run)
@@ -75,18 +76,64 @@ def test_docker_provider_builds_guest_reachable_gateway_command(tmp_path, monkey
     result = provider.run(SandboxExec(command="echo hi", timeout=7))
 
     assert result.ok
-    command = captured["command"]
-    assert command[:3] == ["docker-test", "run", "--rm"]
-    assert ["--add-host", "host.docker.internal:host-gateway"] == command[3:5]
-    assert "-e" in command
-    assert "MACO_GATEWAY_URL=http://host.docker.internal:9/" in command
-    assert "MACO_GATEWAY_TOKEN" in command
-    assert "MACO_GATEWAY_TOKEN=secret-token" not in command
-    assert captured["kwargs"]["env"]["MACO_GATEWAY_TOKEN"] == "secret-token"
-    assert f"{context.scratch}:/workspace" in command
-    assert f"{context.workspace}:/workspace/.maco:ro" in command
-    assert command[-4:] == ["maco-test:latest", "sh", "-lc", "echo hi"]
-    assert captured["kwargs"]["timeout"] == 7
+    run_command, run_kwargs = calls[0]
+    assert run_command[:3] == ["docker-test", "run", "-d"]
+    assert "--rm" in run_command
+    assert "--add-host" in run_command
+    assert "host.docker.internal:host-gateway" in run_command
+    assert "MACO_GATEWAY_URL=http://host.docker.internal:9/" in run_command
+    assert "MACO_GATEWAY_TOKEN" in run_command
+    assert "MACO_GATEWAY_TOKEN=secret-token" not in run_command
+    assert not any(part == "-v" or str(context.workspace) in part for part in run_command)
+    assert run_kwargs["env"]["MACO_GATEWAY_TOKEN"] == "secret-token"
+
+    bootstrap_command = calls[1][0]
+    assert bootstrap_command == [
+        "docker-test",
+        "exec",
+        "container-123",
+        "maco",
+        "sandbox-bootstrap",
+        "--workspace",
+        "/workspace/macosdk",
+    ]
+
+    exec_command, exec_kwargs = calls[2]
+    assert exec_command == [
+        "docker-test",
+        "exec",
+        "-w",
+        "/workspace",
+        "container-123",
+        "sh",
+        "-lc",
+        "echo hi",
+    ]
+    assert exec_kwargs["timeout"] == 7
+
+    provider.stop()
+    assert calls[-1][0] == ["docker-test", "rm", "-f", "container-123"]
+
+
+def test_docker_provider_write_file_writes_inside_container(tmp_path, monkeypatch):
+    context = _context(tmp_path)
+    provider = DockerSandboxProvider(context, image="maco-test:latest", docker_binary="docker-test")
+    calls: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((command, kwargs))
+        if command[:3] == ["docker-test", "run", "-d"]:
+            return subprocess.CompletedProcess(command, 0, stdout="container-123\n", stderr="")
+        return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(docker_provider.subprocess, "run", fake_run)
+
+    guest_path = provider.write_file("nested/task.py", "print('ok')\n")
+
+    assert guest_path == "/workspace/nested/task.py"
+    write_call = calls[-1]
+    assert write_call[0][:5] == ["docker-test", "exec", "-i", "container-123", "sh"]
+    assert write_call[1]["input"] == "print('ok')\n"
 
 
 def test_provider_factory_uses_default_sandbox_image(tmp_path):
@@ -122,6 +169,7 @@ def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, mon
             self.added_hosts: list[tuple[str, str]] = []
             self.secrets: list[tuple[str, str, str, tuple[str, ...]]] = []
             self.mounts: list[tuple[str, str, str, bool]] = []
+            self.memory_mounts: list[str] = []
 
         def with_workspace(self, path: str) -> FakeSandbox:
             captured["workspace"] = path
@@ -155,6 +203,10 @@ def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, mon
 
         def mount_host_dir(self, guest_path: str, host_path: str) -> FakeSandbox:
             self.mounts.append((guest_path, host_path, "host_fs", False))
+            return self
+
+        def mount_memory(self, guest_path: str) -> FakeSandbox:
+            self.memory_mounts.append(guest_path)
             return self
 
     class FakeConfig:
@@ -203,9 +255,13 @@ def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, mon
             ("maco-gateway.internal",),
         )
     ]
-    assert ("/workspace/.maco", str(context.workspace), "host_fs", True) in spec.mounts
-    assert ("/workspace", str(context.scratch), "host_fs", False) in spec.mounts
-    assert captured["execs"] == [("python task.py", "/workspace", 11)]
+    assert spec.mounts == []
+    assert spec.memory_mounts == ["/workspace"]
+    assert captured["execs"] == [
+        ("maco sandbox-bootstrap --workspace /workspace/macosdk", "/workspace", context.timeout),
+        ("python task.py", "/workspace", 11),
+    ]
+    provider.stop()
     assert captured["removed"] is True
     assert not any("secret-token" in part for part in result.command)
 
@@ -252,6 +308,9 @@ def test_matchlock_provider_uses_explicit_gateway_ip_mapping(tmp_path, monkeypat
         def mount_host_dir(self, _guest_path: str, _host_path: str) -> FakeSandbox:
             return self
 
+        def mount_memory(self, _guest_path: str) -> FakeSandbox:
+            return self
+
     class FakeConfig:
         def __init__(self, binary_path: str) -> None:
             captured["binary_path"] = binary_path
@@ -283,7 +342,10 @@ def test_matchlock_provider_uses_explicit_gateway_ip_mapping(tmp_path, monkeypat
     assert captured["spec"].added_hosts == [("maco-gateway.internal", "192.0.2.10")]
     assert captured["spec"].allowed == []
     assert captured["spec"].secrets == []
-    assert captured["execs"] == [("true", "/workspace", context.timeout)]
+    assert captured["execs"] == [
+        ("maco sandbox-bootstrap --workspace /workspace/macosdk", "/workspace", context.timeout),
+        ("true", "/workspace", context.timeout),
+    ]
     assert "hosts=192.0.2.10:maco-gateway.internal" in result.command
 
 

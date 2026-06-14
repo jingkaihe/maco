@@ -2,21 +2,16 @@
 
 from __future__ import annotations
 
+import shlex
 from typing import Any
 from urllib.parse import urlsplit
 
-from ..core import SandboxContext, SandboxError, SandboxExec, SandboxRunResult, translate_loopback_url
-from .base import BaseSandboxProvider
+from ..core import SANDBOX_SDK_ROOT, SandboxContext, SandboxError, SandboxExec, SandboxRunResult, translate_loopback_url
+from .base import RemoteSandboxProvider
 
 
-class MatchlockSandboxProvider(BaseSandboxProvider):
-    """Run commands in a one-shot Matchlock micro-VM."""
-
-    # Matchlock requires mounted guest paths to live under the configured
-    # workspace, so place the generated maco package inside `/workspace` rather
-    # than beside it.
-    guest_workspace = "/workspace/.maco"
-    guest_scratch = "/workspace"
+class MatchlockSandboxProvider(RemoteSandboxProvider):
+    """Run commands inside one long-lived Matchlock micro-VM."""
 
     def __init__(
         self,
@@ -34,35 +29,34 @@ class MatchlockSandboxProvider(BaseSandboxProvider):
         self.gateway_host = gateway_host
         self.gateway_ip = gateway_ip
         self.extra_allow_hosts = extra_allow_hosts or []
+        self.client: Any | None = None
+        self.gateway_url = ""
+        self.allowed_hosts: list[str] = []
+        self.gateway_mapping: tuple[str, str] | None = None
 
-    def run(self, request: SandboxExec) -> SandboxRunResult:
+    def start(self) -> None:
+        if self.client is not None:
+            return
         Client, Config, Sandbox = _load_matchlock_sdk()
-
-        self.context.scratch.mkdir(parents=True, exist_ok=True)
-        gateway_url = translate_loopback_url(self.context.gateway.url, self.gateway_host)
-        env = self._guest_env(request.env, gateway_url=gateway_url)
-        gateway_policy_host = _url_host(gateway_url) or self.gateway_host
-        gateway_mapping = (gateway_policy_host, self.gateway_ip) if self.gateway_ip else None
-        if gateway_mapping is not None and self.extra_allow_hosts:
+        self.gateway_url = translate_loopback_url(self.context.gateway.url, self.gateway_host)
+        env = self._guest_env({}, gateway_url=self.gateway_url)
+        gateway_policy_host = _url_host(self.gateway_url) or self.gateway_host
+        self.gateway_mapping = (gateway_policy_host, self.gateway_ip) if self.gateway_ip else None
+        if self.gateway_mapping is not None and self.extra_allow_hosts:
             raise SandboxError(
                 "matchlock extra allow hosts cannot be combined with a mapped local gateway yet; "
                 "Matchlock currently proxies all HTTP traffic when allow-hosts are configured"
             )
 
         spec = Sandbox(self.image).with_workspace(self.guest_scratch).with_env_map(env)
-        if gateway_mapping is not None:
-            spec.add_host(*gateway_mapping)
-        allow_hosts = [*self.extra_allow_hosts]
-        if gateway_mapping is None:
-            allow_hosts.append(gateway_policy_host)
-        for host in sorted(set(allow_hosts)):
+        if self.gateway_mapping is not None:
+            spec.add_host(*self.gateway_mapping)
+        self.allowed_hosts = [*self.extra_allow_hosts]
+        if self.gateway_mapping is None:
+            self.allowed_hosts.append(gateway_policy_host)
+        for host in sorted(set(self.allowed_hosts)):
             spec.allow_host(host)
-        if self.context.gateway.token and gateway_mapping is None:
-            # With Matchlock, prefer placeholder-based secret injection: the VM
-            # sees only the placeholder, while the host-side network proxy
-            # substitutes the real gateway token for requests to the gateway
-            # host. This keeps the bearer token out of the guest environment and
-            # out of process argv.
+        if self.context.gateway.token and self.gateway_mapping is None:
             placeholder = "MACO_GATEWAY_TOKEN_PLACEHOLDER"
             spec.with_env("MACO_GATEWAY_TOKEN", placeholder)
             spec.add_secret_with_placeholder(
@@ -71,29 +65,43 @@ class MatchlockSandboxProvider(BaseSandboxProvider):
                 placeholder,
                 gateway_policy_host,
             )
-
-        spec.mount_host_dir_readonly(self.guest_workspace, str(self.context.workspace))
-        spec.mount_host_dir(self.guest_scratch, str(self.context.scratch))
+        spec.mount_memory(self.guest_scratch)
 
         config = Config(binary_path=self.matchlock_binary)
         client = Client(config)
         try:
             client.start()
             client.launch(spec)
-            result = client.exec(
-                request.command,
-                working_dir=self.guest_scratch,
-                timeout=self._timeout(request),
-            )
-        finally:
+            self.client = client
+            self._bootstrap_sdk()
+        except Exception:
             client.close()
             try:
                 client.remove()
             except Exception:
-                # Cleanup failures should not mask the command result; Matchlock
-                # GC/prune can reconcile leaked stopped state later.
                 pass
+            self.client = None
+            raise
 
+    def stop(self) -> None:
+        if self.client is None:
+            return
+        client = self.client
+        self.client = None
+        client.close()
+        try:
+            client.remove()
+        except Exception:
+            pass
+
+    def run(self, request: SandboxExec) -> SandboxRunResult:
+        self.start()
+        assert self.client is not None
+        result = self.client.exec(
+            request.command,
+            working_dir=self.guest_scratch,
+            timeout=self._timeout(request),
+        )
         return SandboxRunResult(
             result.exit_code,
             result.stdout,
@@ -102,11 +110,34 @@ class MatchlockSandboxProvider(BaseSandboxProvider):
                 self.matchlock_binary,
                 self.image,
                 request.command,
-                gateway_url=gateway_url,
-                allowed_hosts=sorted(set(allow_hosts)),
-                gateway_mapping=gateway_mapping,
+                gateway_url=self.gateway_url,
+                allowed_hosts=sorted(set(self.allowed_hosts)),
+                gateway_mapping=self.gateway_mapping,
             ),
         )
+
+    def write_file(self, relative_path: str, content: str) -> str:
+        self.start()
+        assert self.client is not None
+        guest_path = self._guest_scratch_path(relative_path)
+        parent = guest_path.rsplit("/", 1)[0]
+        self.client.exec(
+            f"mkdir -p {shlex.quote(parent)}",
+            working_dir=self.guest_scratch,
+            timeout=self.context.timeout,
+        )
+        self.client.write_file(guest_path, content)
+        return guest_path
+
+    def _bootstrap_sdk(self) -> None:
+        assert self.client is not None
+        result = self.client.exec(
+            f"maco sandbox-bootstrap --workspace {shlex.quote(SANDBOX_SDK_ROOT)}",
+            working_dir=self.guest_scratch,
+            timeout=self.context.timeout,
+        )
+        if result.exit_code != 0:
+            raise SandboxError(f"failed to bootstrap Matchlock sandbox SDK: {result.stderr.strip()}")
 
 
 def _sdk_command_summary(

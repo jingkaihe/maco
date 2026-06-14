@@ -11,6 +11,8 @@ from pathlib import Path
 import re
 import shutil
 from typing import Any, cast
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 
@@ -58,33 +60,73 @@ async def generate_async(
 ) -> GenerationStats:
     """Generate Python wrappers for all configured MCP tools."""
 
+    async with MCPManager(config) as manager:
+        tools_by_server = await manager.list_tools(server_filter=server_filter)
+
+    return generate_from_catalog(
+        tools_by_server,
+        workspace=workspace,
+        clean=clean,
+        config_path=config.path,
+    )
+
+
+def generate_from_catalog(
+    tools_by_server: dict[str, list[dict[str, Any]]],
+    *,
+    workspace: str | Path = ".maco",
+    clean: bool = False,
+    config_path: str | Path | None = None,
+    package_name: str = "maco_generated.servers",
+    client_module: str = "maco_generated.client",
+    package_docstring: str = "Generated MCP wrappers for maco.",
+    servers_docstring: str = "Generated MCP server packages.",
+) -> GenerationStats:
+    """Generate wrappers from an already-fetched MCP tool catalog."""
+
     workspace_path = Path(workspace).expanduser().resolve()
     if clean and workspace_path.exists():
         shutil.rmtree(workspace_path)
-    generated_pkg = workspace_path / "maco_generated"
-    servers_pkg = generated_pkg / "servers"
-    servers_pkg.mkdir(parents=True, exist_ok=True)
 
-    async with MCPManager(config) as manager:
-        tools_by_server = await manager.list_tools(server_filter=server_filter)
+    package_parts = package_name.split(".")
+    if not package_parts or any(not part for part in package_parts):
+        raise ValueError("package_name must be a dotted Python package name")
+
+    client_parts = client_module.split(".")
+    if not client_parts or any(not part for part in client_parts):
+        raise ValueError("client_module must be a dotted Python module name")
+
+    generated_pkg = workspace_path / package_parts[0]
+    servers_pkg = workspace_path.joinpath(*package_parts)
+    servers_pkg.mkdir(parents=True, exist_ok=True)
 
     _write_workspace_pyproject(workspace_path)
     _write_template(
         generated_pkg / "__init__.py",
         "codegen/package_init.py.j2",
-        docstring="Generated MCP wrappers for maco.",
+        docstring=package_docstring,
     )
-    _write_template(
-        servers_pkg / "__init__.py",
-        "codegen/package_init.py.j2",
-        docstring="Generated MCP server packages.",
-    )
+    for depth in range(1, max(len(package_parts) - 1, 1)):
+        package_path = workspace_path.joinpath(*package_parts[: depth + 1])
+        _write_template(
+            package_path / "__init__.py",
+            "codegen/package_init.py.j2",
+            docstring=servers_docstring,
+        )
+    if servers_pkg != generated_pkg:
+        _write_template(
+            servers_pkg / "__init__.py",
+            "codegen/package_init.py.j2",
+            docstring=servers_docstring,
+        )
     (generated_pkg / "py.typed").write_text("", encoding="utf-8")
-    _write_client(generated_pkg / "client.py")
+    client_path = workspace_path.joinpath(*client_parts).with_suffix(".py")
+    _write_client(client_path)
 
     manifest = {
         "version": 1,
-        "config": str(config.path),
+        "config": str(config_path) if config_path is not None else None,
+        "package": package_name,
         "servers": [],
     }
 
@@ -108,13 +150,13 @@ async def generate_async(
             tool_name = tool["name"]
             func_name = tool_module_names[tool_name]
             module_path = server_dir / f"{func_name}.py"
-            _write_tool(module_path, server_name, tool, func_name)
+            _write_tool(module_path, server_name, tool, func_name, client_module)
             exports.append(func_name)
             server_manifest["tools"].append(
                 {
                     "name": tool_name,
                     "function": func_name,
-                    "module": f"maco_generated.servers.{server_module}.{func_name}",
+                    "module": f"{package_name}.{server_module}.{func_name}",
                     "description": tool.get("description") or "",
                 }
             )
@@ -145,6 +187,84 @@ def generate(
     return asyncio.run(generate_async(config, workspace, server_filter, clean))
 
 
+def generate_sandbox_sdk(
+    tools_by_server: dict[str, list[dict[str, Any]]],
+    *,
+    workspace: str | Path,
+    clean: bool = True,
+) -> GenerationStats:
+    """Generate the sandbox-facing SDK package at ``tools.<server>``."""
+
+    return generate_from_catalog(
+        tools_by_server,
+        workspace=workspace,
+        clean=clean,
+        package_name="tools",
+        client_module="tools._client",
+        package_docstring="Generated sandbox tools for maco.",
+        servers_docstring="Generated sandbox tool modules.",
+    )
+
+
+def generate_sandbox_sdk_from_gateway(
+    gateway_url: str,
+    *,
+    token: str | None = None,
+    workspace: str | Path,
+    clean: bool = True,
+    timeout: float | None = 30.0,
+) -> GenerationStats:
+    """Generate the sandbox SDK from a running gateway's live tool catalog."""
+
+    return generate_sandbox_sdk(
+        fetch_gateway_tools(gateway_url, token=token, timeout=timeout),
+        workspace=workspace,
+        clean=clean,
+    )
+
+
+def fetch_gateway_tools(
+    gateway_url: str,
+    *,
+    token: str | None = None,
+    timeout: float | None = 30.0,
+) -> dict[str, list[dict[str, Any]]]:
+    """Fetch the live tool catalog from a running maco gateway."""
+
+    url = gateway_url.rstrip("/") + "/tools"
+    headers: dict[str, str] = {}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(url, headers=headers, method="GET")
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"failed to fetch maco gateway tools: HTTP {exc.code}: {detail}") from exc
+    except URLError as exc:
+        raise RuntimeError(f"failed to connect to maco gateway at {url}: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("servers"), dict):
+        raise RuntimeError("maco gateway /tools response must contain a servers object")
+    result: dict[str, list[dict[str, Any]]] = {}
+    for server_name, tools in payload["servers"].items():
+        if not isinstance(server_name, str) or not isinstance(tools, list):
+            raise RuntimeError("maco gateway /tools response has an invalid server entry")
+        server_tools: list[dict[str, Any]] = []
+        for tool in tools:
+            if not isinstance(tool, dict):
+                raise RuntimeError("maco gateway /tools response has an invalid tool entry")
+            server_tools.append(tool)
+        result[server_name] = server_tools
+    return result
+
+
+def server_module_names(server_names: Any) -> dict[str, str]:
+    """Return generated module names for configured MCP server names."""
+
+    return _unique_sanitized_names(server_names)
+
+
 def _render_template(template_name: str, **context: Any) -> str:
     return _CODEGEN_TEMPLATES.get_template(template_name).render(**context)
 
@@ -166,7 +286,13 @@ def _write_client(path: Path) -> None:
     _write_template(path, "codegen/client.py.j2")
 
 
-def _write_tool(path: Path, server_name: str, tool: dict[str, Any], func_name: str) -> None:
+def _write_tool(
+    path: Path,
+    server_name: str,
+    tool: dict[str, Any],
+    func_name: str,
+    client_module: str,
+) -> None:
     tool_name = tool["name"]
     description = tool.get("description") or ""
     input_schema = tool.get("inputSchema") or {"type": "object", "properties": {}}
@@ -190,6 +316,7 @@ def _write_tool(path: Path, server_name: str, tool: dict[str, Any], func_name: s
         output_type_expr=output_type.type_expr,
         output_type_source=output_type.source,
         return_expr=return_expr,
+        client_module=client_module,
         server_name=server_name,
         tool_name=tool_name,
     )

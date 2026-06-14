@@ -152,9 +152,9 @@ tmux -L llm-agent kill-session -t maco-gateway
 `maco serve-mcp` exposes a compact HTTP MCP server with two tools:
 
 - `bash(command, timeout?)` — run a non-interactive shell command in the configured sandbox.
-- `code_execute(code, filename?, args?, timeout?)` — write and run a Python script that imports generated wrappers.
+- `code_execute(code, filename?, args?, timeout?)` — write and run a Python script that imports generated sandbox tools.
 
-The server advertises generated server modules with their sandbox paths. Docker and Matchlock use `/workspace/.maco/maco_generated/servers/<server>` for wrapper code and `/workspace` for writable files. The default sandbox image is `ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine`, which includes `uv`, Python 3.12, `pydantic`, `rg`, and `fd`; use those through `bash` to inspect wrapper exports before writing `code_execute` scripts.
+The server advertises generated server modules with their sandbox paths. Sandbox SDK code lives under `/workspace/macosdk/tools/<server>` and code imports generated tools with `from tools.<server> import <tool>`. Docker and Matchlock bootstrap that SDK inside the sandbox from the live gateway catalog instead of mounting host-generated code. The default sandbox image is `ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine`, which includes the `maco` CLI, `uv`, Python 3.12, `pydantic`, `rg`, and `fd`; use those through `bash` to inspect tool exports before writing `code_execute` scripts.
 
 The sandboxed MCP server is the one-command MCP-mode entrypoint: it generates wrappers, starts a managed maco gateway in the background, then serves HTTP MCP:
 
@@ -164,16 +164,16 @@ uv run maco serve-mcp --config mcp.json --workspace .maco --clean --provider loc
 
 Providers are selected with `--provider local|docker|matchlock`.
 
-- `local` runs commands as local subprocesses and uses the gateway URL from `.maco/gateway.json` directly.
-- `docker` rewrites loopback gateway URLs to `http://host.docker.internal:<port>/`, mounts `.maco` read-only at `/workspace/.maco`, and mounts scratch at `/workspace`.
-- `matchlock` uses the Matchlock Python SDK, rewrites loopback gateway URLs to `http://maco-gateway.internal:<port>/`, mounts `.maco` read-only at `/workspace/.maco`, mounts scratch at `/workspace`, allowlists the gateway host, and passes the gateway token through Matchlock secret placeholders instead of putting the real token in the VM environment.
+- `local` runs commands as local subprocesses and writes the sandbox SDK under the configured workspace.
+- `docker` rewrites loopback gateway URLs to `http://host.docker.internal:<port>/`, starts one long-lived container, bootstraps `/workspace/macosdk/tools` inside it, and executes commands with `docker exec`.
+- `matchlock` uses the Matchlock Python SDK, rewrites loopback gateway URLs to `http://maco-gateway.internal:<port>/`, starts one long-lived VM, bootstraps `/workspace/macosdk/tools` inside it, allowlists the gateway host, and passes the gateway token through Matchlock secret placeholders instead of putting the real token in the VM environment.
 
 When `serve-mcp` manages the gateway itself, it binds the gateway to `127.0.0.1` for the local provider and `0.0.0.0` for Docker/Matchlock so the sandbox can reach it through the provider-specific host alias. If you already run a separate `maco serve`, pass `--gateway-file path/to/gateway.json` to use that gateway instead.
 
 The default Docker/Matchlock sandbox image is built from `images/sandbox/Dockerfile`:
 
 ```bash
-docker build -t ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine images/sandbox
+docker build -f images/sandbox/Dockerfile -t ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine .
 docker save ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine \
   | matchlock image import ghcr.io/jingkaihe/mcp-as-code:0.1.0-alpine
 ```

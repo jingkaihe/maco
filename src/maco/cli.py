@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
-from .codegen import generate
+from .codegen import generate, generate_sandbox_sdk_from_gateway
 from .config import ConfigError, load_config
 from .gateway import ServeOptions, serve
 from .runner import RunnerError, exit_with_error, run_code
-from .sandbox import DEFAULT_SANDBOX_IMAGE
+from .sandbox import DEFAULT_SANDBOX_IMAGE, SANDBOX_SDK_ROOT
 from .serve_mcp import ServeMcpOptions, serve_mcp
 
 
@@ -51,6 +52,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_serve_mcp_options(serve_mcp)
     serve_mcp.set_defaults(func=_cmd_serve_mcp)
+
+    sandbox_bootstrap = subparsers.add_parser(
+        "sandbox-bootstrap",
+        help=argparse.SUPPRESS,
+    )
+    sandbox_bootstrap.add_argument("--gateway-url", help=argparse.SUPPRESS)
+    sandbox_bootstrap.add_argument("--gateway-token", help=argparse.SUPPRESS)
+    sandbox_bootstrap.add_argument("--workspace", default=SANDBOX_SDK_ROOT, help=argparse.SUPPRESS)
+    sandbox_bootstrap.add_argument("--no-clean", action="store_true", help=argparse.SUPPRESS)
+    sandbox_bootstrap.set_defaults(func=_cmd_sandbox_bootstrap)
 
     return parser
 
@@ -201,6 +212,22 @@ def _cmd_serve_mcp(args: argparse.Namespace) -> int:
             matchlock_allow_host=tuple(args.matchlock_allow_host or []),
         )
     )
+    return 0
+
+
+def _cmd_sandbox_bootstrap(args: argparse.Namespace) -> int:
+    gateway_url = args.gateway_url or os.environ.get("MACO_GATEWAY_URL")
+    if not gateway_url:
+        raise ValueError("sandbox bootstrap requires --gateway-url or MACO_GATEWAY_URL")
+    stats = generate_sandbox_sdk_from_gateway(
+        gateway_url,
+        token=args.gateway_token or os.environ.get("MACO_GATEWAY_TOKEN"),
+        workspace=args.workspace,
+        clean=not args.no_clean,
+    )
+    print(f"Generated sandbox SDK with {stats.tool_count} tools from {stats.server_count} servers")
+    print(f"Workspace: {stats.workspace}")
+    print(f"Explore: rg --files {stats.workspace}/tools")
     return 0
 
 
