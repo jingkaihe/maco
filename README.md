@@ -182,6 +182,9 @@ For Docker or Matchlock, bind the maco gateway to a host address reachable by th
 
 The sandbox providers live under `src/maco/sandbox/`, with concrete providers in `src/maco/sandbox/providers/`. Unit tests live under `tests/unit/`. Integration tests live under `tests/integration/`; they exercise the real echo MCP fixture through generated wrappers, the local gateway, and the sandboxed HTTP MCP server. Docker and Matchlock cases run when the host has the required runtime/gateway routing; otherwise those cases are skipped.
 
+See [`examples/serve-mcp`](examples/serve-mcp) for a complete MCP-mode example
+that wraps Playwright MCP and GitHub MCP behind one `maco serve-mcp` endpoint.
+
 ## Development
 
 ```bash

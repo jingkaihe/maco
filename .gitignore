@@ -44,3 +44,7 @@ gateway.json
 *.log
 *.tmp
 *.bak
+
+# Example runtime artifacts
+examples/**/.maco/
+examples/**/scratch/
