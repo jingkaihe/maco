@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from mcp.server.fastmcp import FastMCP
+from pydantic import Field
 
 from .sandbox import (
     GatewayInfo,
@@ -117,17 +119,53 @@ def create_serve_mcp_app(
     )
 
     @app.tool(description=_bash_description(provider, context))
-    def bash(command: str, timeout: int | None = None) -> dict[str, Any]:
+    def bash(
+        command: Annotated[
+            str,
+            Field(description="Non-interactive shell command to run in the sandbox scratch directory."),
+        ],
+        timeout: Annotated[
+            int | None,
+            Field(description="Optional command timeout in seconds. Omit to use the server default."),
+        ] = None,
+    ) -> dict[str, Any]:
         result = provider.run(SandboxExec(command=command, timeout=timeout))
         return _result_payload(result)
 
     @app.tool(description=_code_execute_description(provider, context))
     def code_execute(
-        code: str,
-        filename: str = "task.py",
-        args: list[str] | None = None,
-        timeout: int | None = None,
+        code: Annotated[
+            str,
+            Field(
+                description=(
+                    "Python source code to write into the sandbox scratch directory and execute. "
+                    "Import generated MCP wrappers from maco_generated."
+                )
+            ),
+        ],
+        filename: Annotated[
+            str | None,
+            Field(
+                description=(
+                    "Optional relative .py path in scratch. Leave null to use <hash>.py."
+                )
+            ),
+        ] = None,
+        args: Annotated[
+            list[str] | None,
+            Field(
+                description=(
+                    "Optional command-line arguments passed as sys.argv[1:]. "
+                    "Leave null for no arguments."
+                )
+            ),
+        ] = None,
+        timeout: Annotated[
+            int | None,
+            Field(description="Optional script timeout in seconds. Omit to use the server default."),
+        ] = None,
     ) -> dict[str, Any]:
+        filename = filename if filename is not None else _content_addressed_script_filename(code)
         script = write_code_file(context.scratch, filename, code)
         guest_script = guest_path_for(script, context.scratch, provider.guest_scratch)
         command = provider.python_script_command(guest_script, args or [])
@@ -178,6 +216,11 @@ def _server_catalog_lines(workspace: Path, *, wrapper_root: str, limit: int = 50
 
 def _guest_server_root(provider: SandboxProvider) -> str:
     return f"{provider.guest_workspace.rstrip('/')}/maco_generated/servers"
+
+
+def _content_addressed_script_filename(code: str) -> str:
+    digest = hashlib.sha256(code.encode("utf-8")).hexdigest()[:16]
+    return f"{digest}.py"
 
 
 def _result_payload(result: SandboxRunResult) -> dict[str, Any]:

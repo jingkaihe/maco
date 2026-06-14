@@ -3,9 +3,16 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+import re
 
 from maco.sandbox import GatewayInfo, SandboxContext, SandboxExec, SandboxRunResult
-from maco.serve_mcp import _bash_description, _code_execute_description, _mcp_instructions, create_serve_mcp_app
+from maco.serve_mcp import (
+    _bash_description,
+    _code_execute_description,
+    _content_addressed_script_filename,
+    _mcp_instructions,
+    create_serve_mcp_app,
+)
 
 
 def test_serve_mcp_code_execute_uses_provider_script_command(tmp_path):
@@ -18,6 +25,22 @@ def test_serve_mcp_code_execute_uses_provider_script_command(tmp_path):
         asyncio.run(result)
 
     assert provider.requests[0].command == "python /workspace/task.py"
+
+
+def test_serve_mcp_code_execute_omitted_filename_uses_deterministic_path(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    app = create_serve_mcp_app(provider, context)
+    code = "print('hello')"
+
+    result = app.call_tool("code_execute", {"code": code})
+    if hasattr(result, "__await__"):
+        asyncio.run(result)
+
+    relative = _content_addressed_script_filename(code)
+    assert re.fullmatch(r"[0-9a-f]{16}\.py", relative)
+    assert (context.scratch / relative).read_text(encoding="utf-8") == code
+    assert provider.requests[0].command == f"python /workspace/{relative}"
 
 
 def test_serve_mcp_instructions_list_server_modules_and_rg_fd_discovery(tmp_path):
@@ -52,10 +75,27 @@ def test_code_execute_description_lists_server_modules(tmp_path):
     description = _code_execute_description(provider, context)
 
     assert "from maco_generated.servers.<server> import <tool>" in description
+    assert "For most tasks, pass only the code argument" in description
+    assert "<hash>.py" in description
     assert "- github: /workspace/.maco/maco_generated/servers/github" in description
     assert "/workspace/.maco/maco_generated/servers/<server>/__init__.py" in description
     assert "MACO_GATEWAY_URL" not in description
     assert "PYTHONPATH" not in description
+
+
+def test_code_execute_schema_describes_optional_arguments(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    app = create_serve_mcp_app(provider, context)
+    tools = asyncio.run(app.list_tools())
+    code_execute = next(tool for tool in tools if tool.name == "code_execute")
+
+    schema = code_execute.inputSchema
+    assert schema["required"] == ["code"]
+    assert "Import generated MCP wrappers" in schema["properties"]["code"]["description"]
+    assert "<hash>.py" in schema["properties"]["filename"]["description"]
+    assert "sys.argv[1:]" in schema["properties"]["args"]["description"]
+    assert "server default" in schema["properties"]["timeout"]["description"]
 
 
 def test_bash_description_uses_concrete_wrapper_paths_without_gateway_details(tmp_path):

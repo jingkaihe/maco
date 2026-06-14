@@ -1,4 +1,6 @@
-Run a Python script in the sandbox. Use this for multi-step MCP work, loops, filtering, joins, or structured output.
+Run Python code in the sandbox. Use this for multi-step MCP work, loops, filtering, joins, or structured output.
+
+For most tasks, pass only the code argument. If filename is omitted, maco writes the code to a deterministic content-addressed path like <hash>.py under the writable scratch directory. Use filename only when a readable traceback path or stable named script matters. Use args only when the script explicitly reads command-line arguments.
 
 Import generated tools with:
   from maco_generated.servers.<server> import <tool>
