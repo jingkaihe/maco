@@ -5,13 +5,18 @@
 ## Common commands
 
 ```bash
-uv run pytest -q
-uv run ruff check src tests
-uv run ty check src tests
+make check
+make test-unit
+make test-integration
+make build
+make image
+make image-import
 uv run maco --help
 ```
 
-`ruff` plus `ty` covers source syntax and static typing for normal development. Use `python -m compileall` only as a targeted smoke test for generated code or unusual dynamic-code changes.
+`make check` runs `ruff`, `ty`, and the full pytest suite. Use `make test-unit` for fast unit coverage and `make test-integration` for end-to-end tests that may start real MCP/gateway/sandbox processes. Use `python -m compileall` only as a targeted smoke test for generated code or unusual dynamic-code changes.
+
+`VERSION.txt` is the single version source for the Python package and sandbox image tag. Python builds use Hatchling dynamic versioning from `VERSION.txt`; Docker image tags use `ghcr.io/<owner>/maco:<VERSION>-alpine`. Tag releases must use `v<VERSION>` and are handled by `.github/workflows/release.yml`, which publishes the Python package through PyPI trusted publishing/OIDC and pushes the GHCR image.
 
 Script wrappers mirror the CLI subcommands for skill/drop-in usage:
 
@@ -30,8 +35,8 @@ Script wrappers mirror the CLI subcommands for skill/drop-in usage:
 - `src/maco/gateway.py` — localhost JSON/HTTP gateway used by generated wrappers.
 - `src/maco/runner.py` — `uv run` execution helper that injects workspace/gateway env.
 - `src/maco/sandbox/` — provider-based sandbox package with local, Docker, and Matchlock providers.
-- `src/maco/serve_mcp.py` — experimental HTTP MCP server exposing sandboxed `bash` and `code_execute`.
-- `src/maco/cli.py` — `maco gen`, `maco serve`, `maco run`.
+- `src/maco/serve_mcp.py` — HTTP MCP server exposing sandboxed `bash` and `code_execute`.
+- `src/maco/cli.py` — `maco serve-mcp` plus lower-level `maco gen`, `maco serve`, and `maco run`.
 - `tests/unit/` — fast unit tests.
 - `tests/integration/` — end-to-end tests that may start real MCP/gateway/sandbox processes.
 - `scripts/` — thin bash wrappers around the Python CLI.

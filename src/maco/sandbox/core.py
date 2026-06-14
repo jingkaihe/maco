@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
@@ -14,7 +15,18 @@ class SandboxError(RuntimeError):
     """Raised when a sandbox provider cannot run a command."""
 
 
-DEFAULT_SANDBOX_IMAGE = "ghcr.io/jingkaihe/maco:0.1.0-alpine"
+def _maco_version() -> str:
+    try:
+        return version("maco")
+    except PackageNotFoundError:
+        for parent in Path(__file__).resolve().parents:
+            version_file = parent / "VERSION.txt"
+            if version_file.exists():
+                return version_file.read_text(encoding="utf-8").strip()
+        return "0.0.0"
+
+
+DEFAULT_SANDBOX_IMAGE = f"ghcr.io/jingkaihe/maco:{_maco_version()}-alpine"
 DEFAULT_MATCHLOCK_GATEWAY_IP = "192.168.100.1"
 SANDBOX_SDK_ROOT = "/workspace/macosdk"
 SANDBOX_TOOLS_ROOT = f"{SANDBOX_SDK_ROOT}/tools"

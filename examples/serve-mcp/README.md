@@ -87,5 +87,5 @@ The client will see only two tools, `bash` and `code_execute`, but those tools c
 ## Notes
 
 - Prefer calling `code_execute` with only the `code` argument. If `filename` is omitted, maco writes the script to a deterministic `<hash>.py` file in scratch.
-- The Docker and Matchlock providers use the default sandbox image `ghcr.io/jingkaihe/maco:0.1.0-alpine`, which includes Python 3.12, `uv`, `pydantic`, `rg`, and `fd`.
+- The Docker and Matchlock providers use the default sandbox image `ghcr.io/jingkaihe/maco:<VERSION>-alpine`, where `<VERSION>` comes from the repository `VERSION.txt`. It includes Python 3.12, `uv`, `pydantic`, `rg`, and `fd`.
 - `.maco/` and `maco-serve-mcp/` are local runtime files and should not be committed.

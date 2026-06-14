@@ -161,15 +161,14 @@ Choose the execution provider with `--provider`:
 - `docker` — runs commands in a long-lived Docker container.
 - `matchlock` — runs commands in a long-lived Matchlock micro-VM.
 
-The default Docker/Matchlock image is `ghcr.io/jingkaihe/maco:0.1.0-alpine`, which includes `maco`, Python 3.12, `uv`, `pydantic`, `rg`, and `fd`.
+The default Docker/Matchlock image is `ghcr.io/jingkaihe/maco:<VERSION>-alpine`, where `<VERSION>` comes from [`VERSION.txt`](VERSION.txt). It includes `maco`, Python 3.12, `uv`, `pydantic`, `rg`, and `fd`.
 
 ## Development
 
 ```bash
-uv run pytest -q
-uv run ruff check src tests
-uv run ty check src tests
-uv run maco --help
+make check
+make build
+make image
 ```
 
 ## Safety notes
