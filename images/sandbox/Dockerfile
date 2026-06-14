@@ -10,9 +10,14 @@ COPY pyproject.toml uv.lock README.md LICENSE VERSION.txt ./
 COPY src ./src
 
 RUN UV_NO_CACHE=1 uv pip install --system . \
+    && addgroup -g 1000 -S maco \
+    && adduser -u 1000 -S -D -G maco -h /workspace maco \
+    && mkdir -p /workspace \
+    && chown -R 1000:1000 /workspace \
     && rm -rf /build
 
 WORKDIR /workspace
+USER 1000:1000
 
 # Matchlock's SDK launches the image command before running exec requests.
 # The upstream uv image defaults to `uv`, which exits with usage status when no

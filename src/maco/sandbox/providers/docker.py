@@ -7,7 +7,15 @@ import shlex
 import subprocess
 from urllib.parse import urlsplit, urlunsplit
 
-from ..core import SANDBOX_SDK_ROOT, SandboxContext, SandboxError, SandboxExec, SandboxRunResult, translate_loopback_url
+from ..core import (
+    SANDBOX_SDK_ROOT,
+    SANDBOX_USER,
+    SandboxContext,
+    SandboxError,
+    SandboxExec,
+    SandboxRunResult,
+    translate_loopback_url,
+)
 from .base import RemoteSandboxProvider
 
 
@@ -42,7 +50,7 @@ class DockerSandboxProvider(RemoteSandboxProvider):
         )
         env = self._guest_env({}, gateway_url=gateway_url)
         host_env = os.environ.copy()
-        command = [self.docker_binary, "run", "-d", "--rm"]
+        command = [self.docker_binary, "run", "-d", "--rm", "--user", SANDBOX_USER]
         if self.network:
             command.extend(["--network", self.network])
         if self.gateway_ip:
@@ -90,6 +98,8 @@ class DockerSandboxProvider(RemoteSandboxProvider):
         command = [
             self.docker_binary,
             "exec",
+            "--user",
+            SANDBOX_USER,
             "-w",
             self.guest_scratch,
             self.container_id,
@@ -116,6 +126,8 @@ class DockerSandboxProvider(RemoteSandboxProvider):
             self.docker_binary,
             "exec",
             "-i",
+            "--user",
+            SANDBOX_USER,
             self.container_id,
             "sh",
             "-lc",
@@ -139,6 +151,8 @@ class DockerSandboxProvider(RemoteSandboxProvider):
         command = [
             self.docker_binary,
             "exec",
+            "--user",
+            SANDBOX_USER,
             self.container_id,
             "maco",
             "sandbox-bootstrap",

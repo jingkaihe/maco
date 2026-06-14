@@ -28,6 +28,9 @@ def _maco_version() -> str:
 
 DEFAULT_SANDBOX_IMAGE = f"ghcr.io/jingkaihe/maco:{_maco_version()}-alpine"
 DEFAULT_MATCHLOCK_GATEWAY_IP = "192.168.100.1"
+SANDBOX_UID = 1000
+SANDBOX_GID = 1000
+SANDBOX_USER = f"{SANDBOX_UID}:{SANDBOX_GID}"
 SANDBOX_SDK_ROOT = "/workspace/macosdk"
 SANDBOX_TOOLS_ROOT = f"{SANDBOX_SDK_ROOT}/tools"
 

@@ -19,6 +19,7 @@ from maco.sandbox import (
     GatewayInfo,
     LocalSandboxProvider,
     MatchlockSandboxProvider,
+    SANDBOX_USER,
     SandboxContext,
     SandboxExec,
 )
@@ -79,6 +80,7 @@ with urllib.request.urlopen(request, timeout=5) as response:
 
 print(json.dumps({
     "gateway_url": os.environ["MACO_GATEWAY_URL"],
+    "identity": f"{os.getuid()}:{os.getgid()}",
     "workspace": os.environ["MACO_WORKSPACE"],
     "tool_result": echo(message="sandbox-smoke").result,
     "health": health,
@@ -93,6 +95,8 @@ def _assert_smoke(result: Any, *, expected_gateway_url: str) -> None:
     assert lines, result.stdout
     payload = json.loads(lines[-1])
     assert payload["gateway_url"] == expected_gateway_url
+    if not payload["workspace"].endswith(".maco"):
+        assert payload["identity"] == SANDBOX_USER
     assert payload["workspace"].endswith("macosdk") or payload["workspace"].endswith(".maco")
     assert payload["tool_result"] == "sandbox-smoke"
     assert payload["health"] == {"ok": True}

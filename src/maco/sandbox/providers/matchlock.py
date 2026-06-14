@@ -6,7 +6,15 @@ import shlex
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
-from ..core import SANDBOX_SDK_ROOT, SandboxContext, SandboxError, SandboxExec, SandboxRunResult, translate_loopback_url
+from ..core import (
+    SANDBOX_SDK_ROOT,
+    SANDBOX_USER,
+    SandboxContext,
+    SandboxError,
+    SandboxExec,
+    SandboxRunResult,
+    translate_loopback_url,
+)
 from .base import RemoteSandboxProvider
 
 
@@ -52,7 +60,10 @@ class MatchlockSandboxProvider(RemoteSandboxProvider):
                 "Matchlock currently proxies all HTTP traffic when allow-hosts are configured"
             )
 
-        spec = Sandbox(self.image).with_workspace(self.guest_scratch).with_env_map(env)
+        # Matchlock applies the image-config user from launch to later exec
+        # calls when no per-exec user is supplied, so every client.exec below
+        # runs as the same unprivileged sandbox user.
+        spec = Sandbox(self.image).with_workspace(self.guest_scratch).with_user(SANDBOX_USER).with_env_map(env)
         if self.gateway_mapping is not None:
             spec.add_host(*self.gateway_mapping)
         self.allowed_hosts = [*self.extra_allow_hosts]

@@ -13,6 +13,7 @@ from maco.sandbox import (
     GatewayInfo,
     LocalSandboxProvider,
     MatchlockSandboxProvider,
+    SANDBOX_USER,
     SandboxContext,
     SandboxError,
     SandboxExec,
@@ -80,6 +81,7 @@ def test_docker_provider_bootstraps_and_execs_without_host_sdk_mounts(tmp_path, 
     run_command, run_kwargs = calls[0]
     assert run_command[:3] == ["docker-test", "run", "-d"]
     assert "--rm" in run_command
+    assert _flag_value(run_command, "--user") == SANDBOX_USER
     assert "--add-host" in run_command
     assert "host.docker.internal:172.17.0.1" in run_command
     assert "MACO_GATEWAY_URL=http://host.docker.internal:9/" in run_command
@@ -92,6 +94,8 @@ def test_docker_provider_bootstraps_and_execs_without_host_sdk_mounts(tmp_path, 
     assert bootstrap_command == [
         "docker-test",
         "exec",
+        "--user",
+        SANDBOX_USER,
         "container-123",
         "maco",
         "sandbox-bootstrap",
@@ -103,6 +107,8 @@ def test_docker_provider_bootstraps_and_execs_without_host_sdk_mounts(tmp_path, 
     assert exec_command == [
         "docker-test",
         "exec",
+        "--user",
+        SANDBOX_USER,
         "-w",
         "/workspace",
         "container-123",
@@ -161,7 +167,7 @@ def test_docker_provider_write_file_writes_inside_container(tmp_path, monkeypatc
 
     assert guest_path == "/workspace/nested/task.py"
     write_call = calls[-1]
-    assert write_call[0][:5] == ["docker-test", "exec", "-i", "container-123", "sh"]
+    assert write_call[0][:7] == ["docker-test", "exec", "-i", "--user", SANDBOX_USER, "container-123", "sh"]
     assert write_call[1]["input"] == "print('ok')\n"
 
 
@@ -202,6 +208,10 @@ def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, mon
 
         def with_workspace(self, path: str) -> FakeSandbox:
             captured["workspace"] = path
+            return self
+
+        def with_user(self, user: str) -> FakeSandbox:
+            captured["user"] = user
             return self
 
         def with_env_map(self, env: dict[str, str]) -> FakeSandbox:
@@ -272,6 +282,7 @@ def test_matchlock_provider_uses_sdk_builder_without_leaking_token(tmp_path, mon
     assert captured["image"] == "maco-test:latest"
     assert captured["binary_path"] == "matchlock-test"
     assert captured["workspace"] == "/workspace"
+    assert captured["user"] == SANDBOX_USER
     assert spec.allowed == ["api.example.com", "maco-gateway.internal"]
     assert spec.added_hosts == []
     assert spec.env["MACO_GATEWAY_URL"] == "http://maco-gateway.internal:9/"
@@ -311,6 +322,9 @@ def test_matchlock_provider_uses_explicit_gateway_ip_mapping(tmp_path, monkeypat
             self.secrets: list[tuple[str, ...]] = []
 
         def with_workspace(self, _path: str) -> FakeSandbox:
+            return self
+
+        def with_user(self, _user: str) -> FakeSandbox:
             return self
 
         def with_env_map(self, _env: dict[str, str]) -> FakeSandbox:
@@ -401,3 +415,8 @@ def _context(tmp_path: Path) -> SandboxContext:
         scratch=(tmp_path / "scratch").resolve(),
         gateway=GatewayInfo.from_file(workspace / "gateway.json"),
     )
+
+
+def _flag_value(command: list[str], flag: str) -> str:
+    index = command.index(flag)
+    return command[index + 1]
