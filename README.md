@@ -128,32 +128,22 @@ If you are using the source checkout directly, the script wrapper is equivalent:
 
 ## MCP config
 
-`maco` expects Claude-style JSON with a top-level `mcpServers` object.
+`maco` expects Claude-style JSON with a top-level `mcpServers` object. Supported upstream transports are `stdio`, `http`/`streamable_http`, and `sse`.
 
-For environment variables, put them under `env`. `maco` expands `$VAR` and `${VAR}` using the environment of the `maco` process, then passes the resolved values to the upstream MCP server:
+Minimal stdio example:
 
 ```json
 {
   "mcpServers": {
-    "github": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "ghcr.io/github/github-mcp-server"
-      ],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_TOKEN}"
-      }
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
     }
   }
 }
 ```
 
-HTTP-style servers can use URL and header fields:
+Minimal Streamable HTTP example:
 
 ```json
 {
@@ -167,7 +157,7 @@ HTTP-style servers can use URL and header fields:
 }
 ```
 
-Supported transports are `stdio`, `http`/`streamable_http`, and `sse`.
+For remote HTTP/SSE servers without a static `Authorization` header, maco can perform OAuth from the upstream server's HTTP `401 Bearer` challenge. See [`docs/mcp-config.md`](docs/mcp-config.md) for the full config reference, including environment expansion, headers, OAuth hints, token caching, and tool filtering.
 
 ## Sandbox providers
 

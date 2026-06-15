@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Protocol, cast
 
 from mcp import ClientSession
 from mcp.client.sse import sse_client
@@ -12,6 +12,11 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
 from .config import MacoConfig, ServerConfig
+from .oauth import make_oauth_auth
+
+
+class _Closeable(Protocol):
+    def close(self) -> None: ...
 
 
 @dataclass
@@ -123,15 +128,24 @@ async def _client_streams(server: ServerConfig) -> AsyncIterator[tuple[Any, Any]
         return
 
     if server.is_streamable_http:
-        if server.headers:
+        auth = make_oauth_auth(server)
+        if server.headers or auth:
             import httpx
 
-            async with httpx.AsyncClient(headers=server.headers, follow_redirects=True) as http_client:
-                async with streamable_http_client(
-                    server.base_url or "",
-                    http_client=http_client,
-                ) as (read_stream, write_stream, _get_session_id):
-                    yield read_stream, write_stream
+            try:
+                async with httpx.AsyncClient(
+                    headers=server.headers,
+                    follow_redirects=True,
+                    auth=auth,
+                ) as http_client:
+                    async with streamable_http_client(
+                        server.base_url or "",
+                        http_client=http_client,
+                    ) as (read_stream, write_stream, _get_session_id):
+                        yield read_stream, write_stream
+            finally:
+                if hasattr(auth, "close"):
+                    cast(_Closeable, auth).close()
         else:
             async with streamable_http_client(server.base_url or "") as (
                 read_stream,
@@ -142,8 +156,17 @@ async def _client_streams(server: ServerConfig) -> AsyncIterator[tuple[Any, Any]
         return
 
     if server.is_sse:
-        async with sse_client(server.base_url or "", headers=server.headers or None) as streams:
-            yield streams
+        auth = make_oauth_auth(server)
+        try:
+            async with sse_client(
+                server.base_url or "",
+                headers=server.headers or None,
+                auth=auth,
+            ) as streams:
+                yield streams
+        finally:
+            if hasattr(auth, "close"):
+                cast(_Closeable, auth).close()
         return
 
     raise ValueError(f"unsupported MCP server transport for {server.name}: {server.server_type}")

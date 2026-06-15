@@ -14,6 +14,20 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
+class OAuthConfig:
+    """Optional OAuth hints for remote HTTP/SSE MCP servers."""
+
+    client_id: str | None = None
+    client_secret: str | None = None
+    scopes: list[str] = field(default_factory=list)
+    redirect_uri: str | None = None
+    auth_server_metadata_url: str | None = None
+    interactive: str | None = None
+    open_browser: bool | None = None
+    callback_timeout: float | None = None
+
+
+@dataclass(frozen=True)
 class ServerConfig:
     """Configuration for one MCP server."""
 
@@ -25,6 +39,7 @@ class ServerConfig:
     cwd: str | None = None
     base_url: str | None = None
     headers: dict[str, str] = field(default_factory=dict)
+    oauth: OAuthConfig | None = None
     tool_white_list: list[str] = field(default_factory=list)
 
     @property
@@ -104,6 +119,7 @@ def _parse_server(name: str, raw: dict[str, Any]) -> ServerConfig:
 
     env = _string_map(raw.get("env") or {})
     headers = _string_map(raw.get("headers") or {})
+    oauth = _parse_oauth(name, raw.get("oauth"))
     args = raw.get("args") or []
     if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
         raise ConfigError(f"server {name!r} args must be a list of strings")
@@ -137,8 +153,77 @@ def _parse_server(name: str, raw: dict[str, Any]) -> ServerConfig:
         cwd=cwd,
         base_url=base_url,
         headers=headers,
+        oauth=oauth,
         tool_white_list=white_list,
     )
+
+
+def _parse_oauth(name: str, raw: Any) -> OAuthConfig | None:
+    if raw is None or raw is False:
+        return None
+    if raw is True:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ConfigError(f"server {name!r} oauth must be an object")
+
+    scopes = raw.get("scopes") or []
+    if not isinstance(scopes, list) or not all(isinstance(scope, str) for scope in scopes):
+        raise ConfigError(f"server {name!r} oauth scopes must be a list of strings")
+
+    interactive = _optional_expanded(raw.get("interactive"))
+    if interactive is not None:
+        interactive = interactive.strip().lower()
+
+    return OAuthConfig(
+        client_id=_optional_expanded(raw.get("client_id")),
+        client_secret=_optional_expanded(raw.get("client_secret")),
+        scopes=[_expand_value(scope) for scope in scopes],
+        redirect_uri=_optional_expanded(raw.get("redirect_uri")),
+        auth_server_metadata_url=_optional_expanded(raw.get("auth_server_metadata_url")),
+        interactive=interactive,
+        open_browser=_optional_bool(name, raw.get("open_browser")),
+        callback_timeout=_optional_duration_seconds(name, raw.get("callback_timeout")),
+    )
+
+
+def _optional_bool(name: str, value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = _expand_value(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    raise ConfigError(f"server {name!r} oauth open_browser must be a boolean")
+
+
+def _optional_duration_seconds(name: str, value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, int | float):
+        seconds = float(value)
+    elif isinstance(value, str):
+        seconds = _parse_duration_seconds(_expand_value(value).strip())
+    else:
+        raise ConfigError(
+            f"server {name!r} oauth callback_timeout must be a number or duration string"
+        )
+    if seconds <= 0:
+        raise ConfigError(f"server {name!r} oauth callback_timeout must be positive")
+    return seconds
+
+
+def _parse_duration_seconds(value: str) -> float:
+    if not value:
+        raise ConfigError("oauth callback_timeout must not be empty")
+    multipliers = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+    for suffix, multiplier in multipliers.items():
+        if value.endswith(suffix):
+            return float(value[: -len(suffix)]) * multiplier
+    return float(value)
 
 
 def _infer_server_type(raw: dict[str, Any]) -> str:

@@ -36,6 +36,7 @@ packages = ["src/maco"]
 [tool.hatch.build.targets.sdist]
 include = [
     "src/maco",
+    "docs",
     "README.md",
     "LICENSE",
     "VERSION.txt",
