@@ -7,6 +7,7 @@ from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
+import sys
 from typing import Mapping, Protocol
 from urllib.parse import urlsplit, urlunsplit
 
@@ -41,11 +42,22 @@ def default_sandbox_image() -> str:
 
 DEFAULT_SANDBOX_IMAGE = default_sandbox_image()
 DEFAULT_MATCHLOCK_GATEWAY_IP = "192.168.100.1"
+DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP = "192.168.64.1"
 SANDBOX_UID = 1000
 SANDBOX_GID = 1000
 SANDBOX_USER = f"{SANDBOX_UID}:{SANDBOX_GID}"
 SANDBOX_SDK_ROOT = "/workspace/macosdk"
 SANDBOX_TOOLS_ROOT = f"{SANDBOX_SDK_ROOT}/tools"
+
+
+def default_matchlock_gateway_ip() -> str:
+    """Return the host IP reachable from a default Matchlock guest."""
+
+    if sys.platform == "darwin":
+        # Virtualization.framework NAT exposes the host at this gateway. Linux
+        # Matchlock uses a TAP address from its 192.168.X.0/24 subnet instead.
+        return DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP
+    return DEFAULT_MATCHLOCK_GATEWAY_IP
 
 
 @dataclass(frozen=True)

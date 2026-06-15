@@ -2,18 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 from typing import Protocol, cast
 from urllib.request import urlopen
 
 import httpx
 import pytest
-from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
+from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata, OAuthToken
 from pydantic import AnyUrl
 
 from maco.config import OAuthConfig, ServerConfig
+from maco.mcp_manager import _client_streams
 from maco.oauth import (
     ConfigOverlayTokenStorage,
     FileTokenStorage,
+    MacoOAuthClientProvider,
     OAuthCallbackServer,
     _ignore_intermediate_response_body,
     callback_timeout,
@@ -61,6 +64,84 @@ def test_file_token_storage_round_trips_token_and_client_info(tmp_path):
     assert (tmp_path / "credentials.json").stat().st_mode & 0o777 == 0o600
 
 
+def test_file_token_storage_persists_token_expiry(tmp_path, monkeypatch):
+    monkeypatch.setattr("maco.oauth.time.time", lambda: 1000.0)
+
+    async def run() -> None:
+        storage = FileTokenStorage(tmp_path / "credentials.json")
+
+        await storage.set_tokens(
+            OAuthToken(
+                access_token="access-token",
+                token_type="Bearer",
+                refresh_token="refresh-token",
+                expires_in=3600,
+            )
+        )
+
+        assert await storage.get_token_expiry_time() == 4600.0
+
+    asyncio.run(run())
+
+
+def test_file_token_storage_treats_old_expiring_cache_as_expired(tmp_path):
+    path = tmp_path / "credentials.json"
+    token = OAuthToken(
+        access_token="access-token",
+        token_type="Bearer",
+        refresh_token="refresh-token",
+        expires_in=3600,
+    )
+    path.write_text(
+        json.dumps({"token": token.model_dump(mode="json", exclude_none=True)}),
+        encoding="utf-8",
+    )
+
+    async def run() -> None:
+        storage = FileTokenStorage(path)
+
+        assert await storage.get_token_expiry_time() == 0.0
+
+    asyncio.run(run())
+
+
+def test_oauth_provider_restores_persisted_token_expiry(tmp_path, monkeypatch):
+    monkeypatch.setattr("maco.oauth.time.time", lambda: 1000.0)
+
+    async def run() -> None:
+        storage = FileTokenStorage(tmp_path / "credentials.json")
+        await storage.set_tokens(
+            OAuthToken(
+                access_token="access-token",
+                token_type="Bearer",
+                refresh_token="refresh-token",
+                expires_in=3600,
+            )
+        )
+        await storage.set_client_info(
+            OAuthClientInformationFull(
+                client_id="client-id",
+                redirect_uris=[AnyUrl("http://127.0.0.1:1234/callback")],
+                token_endpoint_auth_method="none",
+            )
+        )
+        provider = MacoOAuthClientProvider(
+            server_url="https://mcp.example/mcp",
+            client_metadata=OAuthClientMetadata(
+                redirect_uris=[AnyUrl("http://127.0.0.1:1234/callback")],
+                token_endpoint_auth_method="none",
+            ),
+            storage=storage,
+            oauth_config=OAuthConfig(),
+        )
+
+        await provider._initialize()
+
+        assert provider.context.token_expiry_time == 4600.0
+
+    asyncio.run(run())
+
+
 def test_config_overlay_supplies_preconfigured_client_id(tmp_path):
     async def run() -> None:
         storage = ConfigOverlayTokenStorage(
@@ -104,6 +185,49 @@ def test_callback_server_wait_times_out():
     asyncio.run(run())
 
 
+def test_oauth_provider_discards_stale_dynamic_client_registration(tmp_path):
+    provider = MacoOAuthClientProvider(
+        server_url="https://mcp.example/mcp",
+        client_metadata=OAuthClientMetadata(
+            redirect_uris=[AnyUrl("http://127.0.0.1:2222/callback")],
+            token_endpoint_auth_method="none",
+        ),
+        storage=FileTokenStorage(tmp_path / "credentials.json"),
+        oauth_config=OAuthConfig(),
+    )
+    provider.context.client_info = OAuthClientInformationFull(
+        client_id="registered-client",
+        redirect_uris=[AnyUrl("http://127.0.0.1:1111/callback")],
+        token_endpoint_auth_method="none",
+    )
+
+    provider._discard_stale_client_info()
+
+    assert provider.context.client_info is None
+
+
+def test_oauth_provider_keeps_configured_client_registration(tmp_path):
+    provider = MacoOAuthClientProvider(
+        server_url="https://mcp.example/mcp",
+        client_metadata=OAuthClientMetadata(
+            redirect_uris=[AnyUrl("http://127.0.0.1:2222/callback")],
+            token_endpoint_auth_method="none",
+        ),
+        storage=FileTokenStorage(tmp_path / "credentials.json"),
+        oauth_config=OAuthConfig(client_id="configured-client"),
+    )
+    client_info = OAuthClientInformationFull(
+        client_id="configured-client",
+        redirect_uris=[AnyUrl("http://127.0.0.1:1111/callback")],
+        token_endpoint_auth_method="none",
+    )
+    provider.context.client_info = client_info
+
+    provider._discard_stale_client_info()
+
+    assert provider.context.client_info == client_info
+
+
 def test_oauth_challenge_body_is_not_drained():
     class UndrainableStream(httpx.AsyncByteStream):
         def __init__(self) -> None:
@@ -143,6 +267,49 @@ def test_make_oauth_auth_skips_static_authorization_header(tmp_path):
     )
 
     assert make_oauth_auth(server, storage_root=tmp_path) is None
+
+
+def test_streamable_http_with_oauth_uses_mcp_http_client_factory(monkeypatch):
+    captured: dict[str, object] = {}
+    auth = object()
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    def create_client(*, headers=None, auth=None):
+        captured["headers"] = headers
+        captured["auth"] = auth
+        return FakeClient()
+
+    @contextlib.asynccontextmanager
+    async def streamable_client(url, *, http_client):
+        captured["url"] = url
+        captured["http_client"] = http_client
+        yield "read", "write", lambda: None
+
+    monkeypatch.setattr("maco.mcp_manager.create_mcp_http_client", create_client)
+    monkeypatch.setattr("maco.mcp_manager.streamable_http_client", streamable_client)
+    monkeypatch.setattr("maco.mcp_manager.make_oauth_auth", lambda server: auth)
+
+    async def run() -> None:
+        server = ServerConfig(
+            name="remote",
+            server_type="http",
+            base_url="https://mcp.example/mcp",
+        )
+        async with _client_streams(server):
+            pass
+
+    asyncio.run(run())
+
+    assert captured["headers"] is None
+    assert captured["auth"] is auth
+    assert captured["url"] == "https://mcp.example/mcp"
+    assert isinstance(captured["http_client"], FakeClient)
 
 
 def test_make_oauth_auth_is_available_for_remote_servers_without_static_auth(tmp_path):

@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator, Protocol, cast
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.client.streamable_http import streamable_http_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
 from .config import MacoConfig, ServerConfig
 from .oauth import make_oauth_auth
@@ -130,12 +130,9 @@ async def _client_streams(server: ServerConfig) -> AsyncIterator[tuple[Any, Any]
     if server.is_streamable_http:
         auth = make_oauth_auth(server)
         if server.headers or auth:
-            import httpx
-
             try:
-                async with httpx.AsyncClient(
-                    headers=server.headers,
-                    follow_redirects=True,
+                async with create_mcp_http_client(
+                    headers=server.headers or None,
                     auth=auth,
                 ) as http_client:
                     async with streamable_http_client(

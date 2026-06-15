@@ -15,7 +15,8 @@ import re
 import sys
 import tempfile
 import threading
-from typing import Any, AsyncGenerator, Callable, Literal, cast
+import time
+from typing import Any, AsyncGenerator, Callable, Literal, Protocol, cast
 from urllib.parse import parse_qs, urlparse
 import webbrowser
 
@@ -52,6 +53,12 @@ TokenEndpointAuthMethod = Literal[
     "client_secret_basic",
     "private_key_jwt",
 ]
+
+
+class TokenExpiryStorage(Protocol):
+    """Optional extension for token stores that persist absolute expiry."""
+
+    async def get_token_expiry_time(self) -> float | None: ...
 
 
 def make_oauth_auth(
@@ -201,7 +208,21 @@ class FileTokenStorage(TokenStorage):
     async def set_tokens(self, tokens: OAuthToken) -> None:
         data = await self._load(missing_ok=True)
         data["token"] = tokens.model_dump(mode="json", exclude_none=True)
+        if tokens.expires_in is None:
+            data.pop("token_expires_at", None)
+        else:
+            data["token_expires_at"] = time.time() + int(tokens.expires_in)
         await self._save(data)
+
+    async def get_token_expiry_time(self) -> float | None:
+        data = await self._load()
+        expires_at = data.get("token_expires_at")
+        if expires_at is not None:
+            return float(expires_at)
+        token = data.get("token")
+        if token and token.get("expires_in") is not None:
+            return 0.0
+        return None
 
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         data = await self._load()
@@ -237,6 +258,12 @@ class ConfigOverlayTokenStorage(TokenStorage):
     async def set_tokens(self, tokens: OAuthToken) -> None:
         await self.inner.set_tokens(tokens)
 
+    async def get_token_expiry_time(self) -> float | None:
+        get_token_expiry_time = getattr(self.inner, "get_token_expiry_time", None)
+        if get_token_expiry_time is None:
+            return None
+        return await get_token_expiry_time()
+
     async def get_client_info(self) -> OAuthClientInformationFull | None:
         stored = await self.inner.get_client_info()
         if not self.config.client_id:
@@ -271,6 +298,25 @@ class MacoOAuthClientProvider(OAuthClientProvider):
     def __init__(self, *args: Any, oauth_config: OAuthConfig, **kwargs: Any):
         super().__init__(*args, **kwargs)
         self.oauth_config = oauth_config
+
+    async def _initialize(self) -> None:
+        await super()._initialize()
+        if not self.context.current_tokens:
+            return
+        expiry_time = await _get_token_expiry_time(self.context.storage)
+        if expiry_time is not None:
+            self.context.token_expiry_time = expiry_time
+        elif self.context.current_tokens.expires_in is not None:
+            self.context.token_expiry_time = 0.0
+
+    def _discard_stale_client_info(self) -> None:
+        if self.oauth_config.client_id or not self.context.client_info:
+            return
+        if _client_info_has_stale_redirect_uri(
+            self.context.client_info,
+            self.context.client_metadata,
+        ):
+            self.context.client_info = None
 
     async def async_auth_flow(
         self, request: httpx.Request
@@ -376,6 +422,7 @@ class MacoOAuthClientProvider(OAuthClientProvider):
             self.context.oauth_metadata,
         )
 
+        self._discard_stale_client_info()
         if not self.context.client_info:
             if should_use_client_metadata_url(
                 self.context.oauth_metadata,
@@ -418,6 +465,24 @@ def _configured_or_discovered_scope(
         protected_resource_metadata,
         authorization_server_metadata,
     )
+
+
+async def _get_token_expiry_time(storage: TokenStorage) -> float | None:
+    get_token_expiry_time = getattr(storage, "get_token_expiry_time", None)
+    if get_token_expiry_time is None:
+        return None
+    return await get_token_expiry_time()
+
+
+def _client_info_has_stale_redirect_uri(
+    client_info: OAuthClientInformationFull,
+    client_metadata: OAuthClientMetadata,
+) -> bool:
+    if not client_info.redirect_uris or not client_metadata.redirect_uris:
+        return False
+    registered_redirect_uris = {str(uri) for uri in client_info.redirect_uris}
+    current_redirect_uris = {str(uri) for uri in client_metadata.redirect_uris}
+    return not current_redirect_uris.issubset(registered_redirect_uris)
 
 
 def _has_bearer_challenge(response: httpx.Response) -> bool:

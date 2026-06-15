@@ -21,12 +21,14 @@ from .codegen import fetch_gateway_tools, generate_sandbox_sdk, server_module_na
 from .config import load_config
 from .gateway import GatewayServer, ServeOptions
 from .sandbox import (
+    DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP,
     DEFAULT_MATCHLOCK_GATEWAY_IP,
     GatewayInfo,
     SandboxContext,
     SandboxExec,
     SandboxProvider,
     SandboxRunResult,
+    default_matchlock_gateway_ip,
     provider_from_name,
 )
 
@@ -408,14 +410,14 @@ def _matchlock_gateway_ip(
     if configured_ip:
         return configured_ip
     if managed_gateway:
-        return DEFAULT_MATCHLOCK_GATEWAY_IP
+        return default_matchlock_gateway_ip()
     try:
         gateway = GatewayInfo.from_file(gateway_file)
     except Exception:
         return None
     host = _url_host(gateway.url)
-    if host == DEFAULT_MATCHLOCK_GATEWAY_IP:
-        return DEFAULT_MATCHLOCK_GATEWAY_IP
+    if host in {DEFAULT_MATCHLOCK_GATEWAY_IP, DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP}:
+        return host
     return None
 
 

@@ -133,7 +133,10 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
     )
     command.add_argument(
         "--matchlock-gateway-ip",
-        help="IP for --add-host <gateway-host>:<ip> inside matchlock (default: 192.168.100.1 for managed gateways)",
+        help=(
+            "IP for --add-host <gateway-host>:<ip> inside matchlock "
+            "(managed default: 192.168.64.1 on macOS, 192.168.100.1 elsewhere)"
+        ),
     )
     command.add_argument(
         "--matchlock-allow-host",

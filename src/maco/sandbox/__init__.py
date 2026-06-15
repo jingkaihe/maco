@@ -1,6 +1,7 @@
 """Sandbox providers for maco serve-mcp execution."""
 
 from .core import (
+    DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP,
     DEFAULT_MATCHLOCK_GATEWAY_IP,
     DEFAULT_SANDBOX_IMAGE,
     GatewayInfo,
@@ -12,6 +13,7 @@ from .core import (
     SandboxExec,
     SandboxProvider,
     SandboxRunResult,
+    default_matchlock_gateway_ip,
     guest_path_for,
     provider_from_name,
     translate_loopback_url,
@@ -24,6 +26,7 @@ from .providers.matchlock import MatchlockSandboxProvider
 __all__ = [
     "DEFAULT_SANDBOX_IMAGE",
     "DEFAULT_MATCHLOCK_GATEWAY_IP",
+    "DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP",
     "DockerSandboxProvider",
     "GatewayInfo",
     "LocalSandboxProvider",
@@ -36,6 +39,7 @@ __all__ = [
     "SandboxExec",
     "SandboxProvider",
     "SandboxRunResult",
+    "default_matchlock_gateway_ip",
     "guest_path_for",
     "provider_from_name",
     "translate_loopback_url",
