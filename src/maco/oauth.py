@@ -80,13 +80,14 @@ def make_oauth_auth(
     redirect_uri = callback.redirect_uri
     storage = FileTokenStorage(credential_path)
     client_metadata = _client_metadata(server, oauth, redirect_uri)
+    timeout = callback_timeout(oauth)
     provider = MacoOAuthClientProvider(
         server_url=server.base_url,
         client_metadata=client_metadata,
         storage=ConfigOverlayTokenStorage(storage, oauth),
         redirect_handler=_redirect_handler(server.name, oauth),
-        callback_handler=callback.wait,
-        timeout=callback_timeout(oauth),
+        callback_handler=lambda: callback.wait(timeout=timeout),
+        timeout=timeout,
         oauth_config=oauth,
     )
     return _ClosingOAuthAuth(provider, callback)
@@ -293,7 +294,7 @@ class MacoOAuthClientProvider(OAuthClientProvider):
             response = yield request
 
             if response.status_code == 401 and _has_bearer_challenge(response):
-                await response.aread()
+                await _ignore_intermediate_response_body(response)
                 flow = self._complete_oauth_flow(response)
                 try:
                     next_request = await flow.__anext__()
@@ -426,6 +427,14 @@ def _has_bearer_challenge(response: httpx.Response) -> bool:
     )
 
 
+async def _ignore_intermediate_response_body(response: httpx.Response) -> None:
+    # HTTPX drains intermediate auth responses after this auth flow yields the
+    # next request. The OAuth challenge is header-only, so avoid depending on
+    # response-body framing for streamed MCP responses.
+    response._content = b""
+    await response.aclose()
+
+
 def _atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=path.name, suffix=".tmp", dir=path.parent)
@@ -520,8 +529,11 @@ class OAuthCallbackServer:
         thread.start()
         return cls(server, thread, redirect_uri, result)
 
-    async def wait(self) -> tuple[str, str | None]:
-        result = await asyncio.to_thread(self._result.get)
+    async def wait(self, *, timeout: float = DEFAULT_CALLBACK_TIMEOUT) -> tuple[str, str | None]:
+        try:
+            result = await asyncio.to_thread(self._result.get, True, timeout)
+        except queue.Empty as exc:
+            raise TimeoutError(f"Timed out waiting {timeout:g} seconds for OAuth callback") from exc
         if result.error:
             raise RuntimeError(f"OAuth authorization failed: {html.escape(result.error)}")
         return result.code, result.state

@@ -167,13 +167,16 @@ class OAuthProtectedMCPServer:
 
     def _handle_mcp(self, handler: BaseHTTPRequestHandler) -> None:
         if handler.headers.get("Authorization") != f"Bearer {self.access_token}":
+            self._read_text(handler)
+            body = b"authorization required"
             handler.send_response(401)
             handler.send_header(
                 "WWW-Authenticate",
                 f'Bearer realm="mcp", resource_metadata="{self.url}/.well-known/oauth-protected-resource", scope="mcp.read"',
             )
+            handler.send_header("Content-Length", str(len(body)))
             handler.end_headers()
-            handler.wfile.write(b"authorization required")
+            handler.wfile.write(body)
             return
         if handler.command == "DELETE":
             handler.send_response(204)

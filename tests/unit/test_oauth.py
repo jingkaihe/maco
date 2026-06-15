@@ -5,6 +5,7 @@ import contextlib
 from typing import Protocol, cast
 from urllib.request import urlopen
 
+import httpx
 import pytest
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 from pydantic import AnyUrl
@@ -14,6 +15,7 @@ from maco.oauth import (
     ConfigOverlayTokenStorage,
     FileTokenStorage,
     OAuthCallbackServer,
+    _ignore_intermediate_response_body,
     callback_timeout,
     credentials_path,
     make_oauth_auth,
@@ -86,6 +88,47 @@ def test_callback_server_returns_code_and_state():
             assert await callback.wait() == ("oauth-code", "state-123")
         finally:
             callback.close()
+
+    asyncio.run(run())
+
+
+def test_callback_server_wait_times_out():
+    async def run() -> None:
+        callback = OAuthCallbackServer.start()
+        try:
+            with pytest.raises(TimeoutError, match="Timed out waiting 0.01 seconds for OAuth callback"):
+                await callback.wait(timeout=0.01)
+        finally:
+            callback.close()
+
+    asyncio.run(run())
+
+
+def test_oauth_challenge_body_is_not_drained():
+    class UndrainableStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def __aiter__(self):
+            raise AssertionError("OAuth challenge body should not be read")
+            yield b""
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    async def run() -> None:
+        stream = UndrainableStream()
+        response = httpx.Response(
+            401,
+            headers={"WWW-Authenticate": 'Bearer realm="mcp", scope="mcp.read"'},
+            stream=stream,
+            request=httpx.Request("POST", "https://mcp.example/mcp"),
+        )
+
+        await _ignore_intermediate_response_body(response)
+
+        assert stream.closed
+        assert await response.aread() == b""
 
     asyncio.run(run())
 
