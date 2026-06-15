@@ -22,6 +22,7 @@ from maco.sandbox import (
     SANDBOX_USER,
     SandboxContext,
     SandboxExec,
+    default_matchlock_gateway_ip,
 )
 from maco.serve_mcp import _detect_docker_gateway_ip, _is_docker_desktop
 
@@ -59,7 +60,7 @@ def test_matchlock_provider_executes_with_gateway_and_generated_workspace(tmp_pa
         provider = MatchlockSandboxProvider(
             context,
             image=DEFAULT_SANDBOX_IMAGE,
-            gateway_ip="192.168.100.1",
+            gateway_ip=default_matchlock_gateway_ip(),
         )
         try:
             result = _run_smoke(provider)

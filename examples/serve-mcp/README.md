@@ -36,7 +36,7 @@ MCP client ──HTTP──▶ maco serve-mcp ──sandbox──▶ generated P
 If you are already authenticated with the GitHub CLI, export a token directly:
 
 ```bash
-export GITHUB_PERSONAL_ACCESS_TOKEN=$(gh auth token)
+export GITHUB_TOKEN=$(gh auth token)
 ```
 
 ## 1. Start `maco serve-mcp`

@@ -49,3 +49,4 @@ gateway.json
 examples/**/.maco/
 examples/**/scratch/
 examples/**/maco-serve-mcp/
+examples/**/.playwright-mcp/

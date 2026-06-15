@@ -114,6 +114,36 @@ HTTP and SSE servers can use Claude-style URL fields:
 }
 ```
 
+For remote HTTP/SSE MCP servers without static `Authorization` headers, OAuth is
+auto-discovered from HTTP 401 Bearer challenges. Add an `oauth` object only for
+providers that need pre-registered clients, scopes, or callback behavior:
+
+```json
+{
+  "mcpServers": {
+    "remote": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "oauth": {
+        "client_id": "${MCP_CLIENT_ID}",
+        "client_secret": "${MCP_CLIENT_SECRET}",
+        "scopes": ["mcp.read"],
+        "redirect_uri": "http://127.0.0.1:1456/mcp/oauth/callback",
+        "interactive": "auto",
+        "open_browser": true,
+        "callback_timeout": "2m"
+      }
+    }
+  }
+}
+```
+
+Omit `oauth` entirely when dynamic client registration and standard discovery are
+enough. Static `Authorization` headers take precedence and skip OAuth. Tokens are
+cached under `~/.maco/mcp/oauth/`. For CI/headless runs set `oauth.interactive`
+or `MACO_MCP_OAUTH_INTERACTIVE` to `never`; `MACO_MCP_OAUTH_OPEN_BROWSER` and
+`MACO_MCP_OAUTH_CALLBACK_TIMEOUT` can override browser and timeout behavior.
+
 Supported transports: `stdio`, `http`/`streamable_http`, and `sse`.
 
 ## When to use maco
