@@ -1,12 +1,12 @@
 # maco
 
-`maco` (mcp-as-code) integrates all the MCP servers you need into a compacted MCP server with a programmatic interface, so that your agent's context window is kept small and tidy.
+**Connect every MCP server you need without drowning your agent's context window.**
 
-As the number of MCP servers connected to your agent grows, your agent's context window becomes cluttered with tool definition schemas, with intermediate tool results consuming additional tokens.
+As the number of MCP servers you connect grows, tool schemas and intermediate tool call results clutter your agent's context. `maco` (mcp-as-code) collapses them all into a single endpoint with a programmatic interface.
 
-Instead of loading hundreds of tool schemas upfront and letting your agent make inefficient direct tool calls, `maco` reconstructs MCP tools and schemas as Pydantic models and Python functions in a virtual filesystem, and empowers your agent with the tools it is most capable of using: a bash tool for code navigation, and `code_execute` to compose SDK-ified MCP tool calls into compact and efficient control flow.
+Instead of loading hundreds if not thousands of tool schemas upfront, `maco` reconstructs every MCP tool as Pydantic models and Python functions in a virtual filesystem and hands your agent just two of its favourite tools: `bash` to navigate, and `code_execute` to run. The agent discovers and composes tools as code, the thing frontier models do best.
 
-## Why it helps
+## How it works
 
 **Small context footprint:** the agent starts with two tools (`bash` and `code_execute`), not every MCP tool schema upfront.
 
@@ -126,9 +126,9 @@ See [`docs/mcp-config.md`](docs/mcp-config.md) for the full config reference, in
 
 Choose the execution provider with `--provider`:
 
-- `local` — fastest feedback loop; runs commands as local subprocesses.
-- `docker` — runs commands in a long-lived Docker container.
-- `matchlock` — runs commands in a long-lived Matchlock micro-VM.
+- `local`: fastest feedback loop; runs commands as local subprocesses.
+- `docker`: runs commands in a long-lived Docker container.
+- `matchlock`: runs commands in a long-lived Matchlock micro-VM.
 
 ## License
 
