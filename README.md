@@ -1,6 +1,6 @@
 # maco
 
-**Connect every MCP server you need without drowning your agent's context window.**
+**Connect every MCP server you need, keeping your agent's context lean.**
 
 As the number of MCP servers you connect grows, tool schemas and intermediate tool call results clutter your agent's context. `maco` (mcp-as-code) collapses them all into a single endpoint with a programmatic interface.
 
