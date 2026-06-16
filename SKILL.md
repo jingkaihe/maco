@@ -16,13 +16,7 @@ Prefer MCP mode whenever possible. `maco serve-mcp` starts a managed gateway for
 
 Agents thrive on discovery with `rg` and `fd`, so maco gives them `bash` access to navigate the tool interface as a real filesystem before writing code.
 
-Start it from this repository/skill directory with:
-
-```bash
-./scripts/maco-serve-mcp --config mcp.json --provider local
-```
-
-If installed as a package, use:
+Start it from this repository/skill directory or an installed package environment with:
 
 ```bash
 uv run maco serve-mcp --config mcp.json --provider local
