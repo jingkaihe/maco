@@ -4,17 +4,17 @@
 
 As the number of MCP servers connected to your agent grows, your agent's context window becomes cluttered with tool definition schemas, with intermediate tool results consuming additional tokens.
 
-Instead of loading hundreds of tool schemas upfront, and letting your agent making inefficient direct tool calls, `maco` reconstructs MCP tools and schemas as Pydantic models and Python functions in a virtual filesystem, and empowers your agent with the tools it is most capable of using: a bash tool for code navigation, and `code_execute` to compose SDK-ified MCP tool calls into compact and efficient control flow.
+Instead of loading hundreds of tool schemas upfront and letting your agent make inefficient direct tool calls, `maco` reconstructs MCP tools and schemas as Pydantic models and Python functions in a virtual filesystem, and empowers your agent with the tools it is most capable of using: a bash tool for code navigation, and `code_execute` to compose SDK-ified MCP tool calls into compact and efficient control flow.
 
 ## Why it helps
 
-**Small context footprint:** the agent starts with two tools (`bash` and `code_execute`), not every MCP tool schemas upfront.
+**Small context footprint:** the agent starts with two tools (`bash` and `code_execute`), not every MCP tool schema upfront.
 
-**Progressive discovery:** frontier models excel at navigating filesystems, by representing the tool interface as code on a filesystem, agent can leverage `rg`, `fd` and all the POSIX tools to discover and execute relevant MCP tools.
+**Progressive discovery:** frontier models excel at navigating filesystems. By representing the tool interface as code on a filesystem, the agent can leverage `rg`, `fd` and all the POSIX tools to discover and execute relevant MCP tools.
 
 ```bash
 tools
-└── playwright
+├── playwright
 │   ├── browserClick.py
 │   ├── browserClose.py
 │   ├── ... many other tools
@@ -24,7 +24,7 @@ tools
     └── __init__.py
 ```
 
-**Programmatic leverage:** the agent are given real programming languages Python, allowing them to orchestrate complex control flows with exceptional context-efficiency using loops, conditions, and state management.
+**Programmatic leverage:** the agent is given a real programming language, Python, allowing it to orchestrate complex control flows with exceptional context-efficiency using loops, conditions, and state management.
 
 ```python
 from collections import Counter
@@ -49,9 +49,7 @@ for login, count in counts.most_common():
     print(f"@{login}: {count} commits ({count / total:.1%})")
 ```
 
-The example above illustrates the mcp code that will be executed to find the top contributors to an open-source repository.
-
-
+The example above illustrates the MCP code that will be executed to find the top contributors to an open-source repository.
 
 ## Installation
 
@@ -85,6 +83,8 @@ Create a `mcp.json`:
     }
 }
 ```
+
+This config needs `npx` (for Playwright MCP), a GitHub token in `GITHUB_TOKEN`, and Docker if you use the `docker` provider.
 
 Start the `maco` MCP server:
 
