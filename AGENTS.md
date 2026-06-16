@@ -20,15 +20,6 @@ Use `uv run python -m ast path/to/file.py >/dev/null` as a targeted syntax-only 
 
 `VERSION.txt` is the single version source for the Python package and sandbox image tag. The Python distribution name is `mcp-as-code`; the import package and executable are `maco`. Python builds use Hatchling dynamic versioning from `VERSION.txt`; Docker image tags use `ghcr.io/<owner>/maco:<VERSION>-alpine`. Release builds call `scripts/write-build-info` before `uv build` so `maco version` reports the package version, commit SHA, and release date. Tag releases must use `v<VERSION>` and are handled by `.github/workflows/release.yml`, which publishes the Python package through PyPI trusted publishing/OIDC and pushes the GHCR image.
 
-Script wrappers mirror the CLI subcommands for skill/drop-in usage:
-
-```bash
-./scripts/maco-gen --help
-./scripts/maco-serve --help
-./scripts/maco-run --help
-./scripts/maco-serve-mcp --help
-```
-
 ## Structure
 
 - `src/maco/config.py` — load Claude-style `mcpServers` MCP config.
@@ -41,5 +32,5 @@ Script wrappers mirror the CLI subcommands for skill/drop-in usage:
 - `src/maco/cli.py` — `maco serve-mcp` plus lower-level `maco gen`, `maco serve`, and `maco run`.
 - `tests/unit/` — fast unit tests.
 - `tests/integration/` — end-to-end tests that may start real MCP/gateway/sandbox processes.
-- `scripts/` — thin bash wrappers around the Python CLI.
+- `scripts/` — release/build helper scripts.
 - `SKILL.md` — agent-facing workflow and usage guide.
