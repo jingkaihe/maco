@@ -28,7 +28,7 @@ cd examples/serve-mcp
 uv run maco up --provider local
 ```
 
-This uses `mcp.json`, writes `.maco/gateway.json`, uses the default scratch directory, starts the gateway, and serves HTTP MCP at `http://127.0.0.1:8789/mcp`. Add `--clean` only when you want to recreate the local generated SDK from scratch.
+This uses `mcp.json`, writes `.maco/gateway.json`, uses `.maco/scratch` as the default scratch directory, starts the gateway, and serves HTTP MCP at `http://127.0.0.1:8789/mcp`. Add `--clean` only when you want to recreate the local generated SDK from scratch.
 
 ## 2. Connect an agent to the MCP gateway
 

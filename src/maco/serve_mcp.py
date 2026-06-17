@@ -107,7 +107,7 @@ def serve_mcp(options: ServeMcpOptions) -> None:
         scratch = (
             Path(options.scratch).expanduser().resolve()
             if options.scratch is not None
-            else workspace.parent / "maco-up"
+            else default_scratch_path(workspace)
         )
         gateway_file = (
             Path(options.gateway_file).expanduser().resolve()
@@ -302,6 +302,12 @@ def create_serve_mcp_app(
         return payload
 
     return app
+
+
+def default_scratch_path(workspace: Path) -> Path:
+    """Return the default writable scratch directory for a maco workspace."""
+
+    return workspace / "scratch"
 
 
 def _mcp_instructions(

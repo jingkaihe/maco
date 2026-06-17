@@ -24,6 +24,7 @@ from maco.serve_mcp import (
     _result_payload,
     _validate_managed_gateway_bind,
     create_serve_mcp_app,
+    default_scratch_path,
 )
 
 
@@ -38,6 +39,12 @@ def test_serve_mcp_code_execute_uses_provider_script_command(tmp_path):
 
     assert provider.writes == [("task.py", "print('hello')")]
     assert provider.requests[0].command == "python /workspace/task.py"
+
+
+def test_default_scratch_path_lives_under_workspace(tmp_path):
+    workspace = tmp_path / ".maco"
+
+    assert default_scratch_path(workspace) == workspace / "scratch"
 
 
 def test_serve_mcp_code_execute_omitted_filename_uses_deterministic_path(tmp_path):
