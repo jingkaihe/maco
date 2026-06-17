@@ -74,7 +74,7 @@ def test_serve_mcp_providers_call_real_backend_with_generated_client(tmp_path, p
             payloads = asyncio.run(_call_generated_client_tool_values(mcp_url, provider))
         except Exception as exc:  # pragma: no cover - Matchlock host/runtime dependent
             if provider == "matchlock":
-                pytest.skip(f"matchlock serve-mcp integration unavailable on this host: {exc}")
+                pytest.skip(f"matchlock maco up integration unavailable on this host: {exc}")
             raise
 
     for payload in payloads.values():
@@ -267,7 +267,7 @@ def _serve_mcp(
         "--project",
         str(repo),
         "maco",
-        "serve-mcp",
+        "up",
         "--config",
         str(config_path),
         "--workspace",
@@ -305,7 +305,7 @@ async def _wait_for_mcp_server(process: subprocess.Popen[str], mcp_url: str) -> 
     last_error: Exception | None = None
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise AssertionError(f"maco serve-mcp exited early:\n{_read_process_output(process)}")
+            raise AssertionError(f"maco up exited early:\n{_read_process_output(process)}")
         try:
             async with _streamable_client(mcp_url, timeout=3) as (read, write, _):
                 async with ClientSession(read, write) as session:
@@ -317,7 +317,7 @@ async def _wait_for_mcp_server(process: subprocess.Popen[str], mcp_url: str) -> 
         except Exception as exc:
             last_error = exc
         await asyncio.sleep(0.2)
-    raise AssertionError(f"maco serve-mcp did not become ready: {last_error}\n{_read_process_output(process)}")
+    raise AssertionError(f"maco up did not become ready: {last_error}\n{_read_process_output(process)}")
 
 
 def _free_port() -> int:

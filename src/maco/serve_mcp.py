@@ -80,7 +80,7 @@ def _install_shutdown_signal_handlers() -> tuple[tuple[int, Any], ...]:
         return ()
 
     def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
-        print(f"\nreceived signal {signum}; stopping maco serve-mcp", file=sys.stderr)
+        print(f"\nreceived signal {signum}; stopping maco MCP server", file=sys.stderr)
         raise _ServeMcpShutdown
 
     return (
@@ -107,7 +107,7 @@ def serve_mcp(options: ServeMcpOptions) -> None:
         scratch = (
             Path(options.scratch).expanduser().resolve()
             if options.scratch is not None
-            else workspace.parent / "maco-serve-mcp"
+            else workspace.parent / "maco-up"
         )
         gateway_file = (
             Path(options.gateway_file).expanduser().resolve()
@@ -203,7 +203,7 @@ def serve_mcp(options: ServeMcpOptions) -> None:
         )
         provider.start()
         app = create_serve_mcp_app(provider, context, server_modules=modules, host=options.host, port=options.port)
-        print("maco serve-mcp started")
+        print("maco MCP server started")
         print(f"  URL: http://{options.host}:{options.port}/mcp")
         print(f"  provider: {options.provider}")
         print(f"  SDK: {provider.guest_workspace}")
@@ -237,7 +237,7 @@ def create_serve_mcp_app(
     """
 
     app = FastMCP(
-        "maco-serve-mcp",
+        "maco",
         instructions=_mcp_instructions(provider, context, server_modules=server_modules),
         host=host,
         port=port,

@@ -29,7 +29,7 @@ Use `uv run python -m ast path/to/file.py >/dev/null` as a targeted syntax-only 
 - `src/maco/runner.py` — `uv run` execution helper that injects workspace/gateway env.
 - `src/maco/sandbox/` — provider-based sandbox package with local, Docker, and Matchlock providers.
 - `src/maco/serve_mcp.py` — HTTP MCP server exposing sandboxed `bash` and `code_execute`.
-- `src/maco/cli.py` — `maco serve-mcp` plus lower-level `maco gen`, `maco serve`, and `maco run`.
+- `src/maco/cli.py` — `maco up`, `maco status`, `maco down`, `maco ls`, plus lower-level `maco gen` and `maco run`.
 - `tests/unit/` — fast unit tests.
 - `tests/integration/` — end-to-end tests that may start real MCP/gateway/sandbox processes.
 - `scripts/` — release/build helper scripts.

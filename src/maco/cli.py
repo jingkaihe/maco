@@ -12,6 +12,16 @@ from .gateway import ServeOptions, serve
 from .runner import RunnerError, exit_with_error, run_code
 from .sandbox import DEFAULT_SANDBOX_IMAGE, SANDBOX_SDK_ROOT
 from .serve_mcp import ServeMcpOptions, serve_mcp
+from .service import (
+    DEFAULT_MCP_PORT,
+    ServiceError,
+    ensure_no_detached_service,
+    find_available_port,
+    list_services,
+    show_status,
+    start_detached,
+    stop_detached,
+)
 from .version import get_version_info
 
 
@@ -32,16 +42,6 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--clean", action="store_true", help="remove the workspace before generating")
     gen.set_defaults(func=_cmd_gen)
 
-    serve_parser = subparsers.add_parser("serve", help="run the local maco gateway server")
-    serve_parser.add_argument("--config", default="mcp.json", help="MCP config path (default: mcp.json)")
-    serve_parser.add_argument("--workspace", default=".maco", help="generated workspace directory (default: .maco)")
-    serve_parser.add_argument("--clean", action="store_true", help="remove the workspace before generating")
-    serve_parser.add_argument("--host", default="127.0.0.1", help="host to bind (default: 127.0.0.1)")
-    serve_parser.add_argument("--port", default=0, type=int, help="port to bind (default: 0, an ephemeral port)")
-    serve_parser.add_argument("--token", help="explicit bearer token for generated code")
-    serve_parser.add_argument("--no-token", action="store_true", help="disable gateway bearer-token protection")
-    serve_parser.set_defaults(func=_cmd_serve)
-
     run = subparsers.add_parser("run", help="run a Python file with generated wrappers available")
     run.add_argument("--workspace", help="generated workspace directory (default: auto-detect)")
     run.add_argument("--cwd", help="working directory for the script")
@@ -50,27 +50,64 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("script_args", nargs=argparse.REMAINDER, help="arguments passed to the Python file")
     run.set_defaults(func=_cmd_run)
 
-    serve_mcp = subparsers.add_parser(
-        "serve-mcp",
-        help="run an HTTP MCP server exposing sandboxed bash and code execution",
+    up = subparsers.add_parser(
+        "up",
+        help="start the sandboxed maco MCP server",
     )
-    _add_serve_mcp_options(serve_mcp)
-    serve_mcp.set_defaults(func=_cmd_serve_mcp)
+    _add_serve_mcp_options(up, port_default=None)
+    up.add_argument(
+        "-d",
+        "--detach",
+        action="store_true",
+        help="start maco in the background for this project",
+    )
+    up.set_defaults(func=_cmd_up)
 
-    sandbox_bootstrap = subparsers.add_parser(
-        "sandbox-bootstrap",
-        help=argparse.SUPPRESS,
-    )
-    sandbox_bootstrap.add_argument("--gateway-url", help=argparse.SUPPRESS)
-    sandbox_bootstrap.add_argument("--gateway-token", help=argparse.SUPPRESS)
-    sandbox_bootstrap.add_argument("--workspace", default=SANDBOX_SDK_ROOT, help=argparse.SUPPRESS)
-    sandbox_bootstrap.add_argument("--no-clean", action="store_true", help=argparse.SUPPRESS)
-    sandbox_bootstrap.set_defaults(func=_cmd_sandbox_bootstrap)
+    status = subparsers.add_parser("status", help="show detached maco status for this project")
+    status.add_argument("--workspace", default=".maco", help="generated workspace directory")
+    status.set_defaults(func=_cmd_status)
+
+    down = subparsers.add_parser("down", help="stop detached maco for this project")
+    down.add_argument("--workspace", default=".maco", help="generated workspace directory")
+    down.set_defaults(func=_cmd_down)
+
+    ls = subparsers.add_parser("ls", help="list detached maco processes")
+    ls.set_defaults(func=_cmd_ls)
 
     return parser
 
 
-def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
+def _build_internal_mcp_server_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="maco _mcp-server", add_help=False)
+    _add_serve_mcp_options(parser)
+    parser.set_defaults(func=_cmd_mcp_server)
+    return parser
+
+
+def _build_internal_gateway_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="maco _gateway", add_help=False)
+    parser.add_argument("--config", default="mcp.json")
+    parser.add_argument("--workspace", default=".maco")
+    parser.add_argument("--clean", action="store_true")
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", default=0, type=int)
+    parser.add_argument("--token")
+    parser.add_argument("--no-token", action="store_true")
+    parser.set_defaults(func=_cmd_serve)
+    return parser
+
+
+def _build_internal_sandbox_bootstrap_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="maco sandbox-bootstrap", add_help=False)
+    parser.add_argument("--gateway-url")
+    parser.add_argument("--gateway-token")
+    parser.add_argument("--workspace", default=SANDBOX_SDK_ROOT)
+    parser.add_argument("--no-clean", action="store_true")
+    parser.set_defaults(func=_cmd_sandbox_bootstrap)
+    return parser
+
+
+def _add_serve_mcp_options(command: argparse.ArgumentParser, *, port_default: int | None = DEFAULT_MCP_PORT) -> None:
     command.add_argument("--config", default="mcp.json", help="MCP config path (default: mcp.json)")
     command.add_argument(
         "--provider",
@@ -87,13 +124,13 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
     )
     command.add_argument(
         "--gateway-host",
-        help="host for the managed gateway started by serve-mcp",
+        help="host for the managed gateway started by maco up",
     )
     command.add_argument(
         "--gateway-port",
         default=0,
         type=int,
-        help="port for the managed gateway started by serve-mcp (default: 0)",
+        help="port for the managed gateway started by maco up (default: 0)",
     )
     command.add_argument("--gateway-token", help="explicit bearer token for the managed gateway")
     command.add_argument(
@@ -102,7 +139,12 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
         help="disable bearer-token protection for the managed gateway",
     )
     command.add_argument("--host", default="127.0.0.1", help="HTTP MCP bind host")
-    command.add_argument("--port", default=8789, type=int, help="HTTP MCP bind port")
+    port_help = (
+        "HTTP MCP bind port (default: auto)"
+        if port_default is None
+        else f"HTTP MCP bind port (default: {port_default})"
+    )
+    command.add_argument("--port", default=port_default, type=int, help=port_help)
     command.add_argument("--timeout", default=60, type=int, help="default command timeout in seconds")
     command.add_argument(
         "--debug",
@@ -147,11 +189,22 @@ def _add_serve_mcp_options(command: argparse.ArgumentParser) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
     try:
+        if argv and argv[0] == "_mcp-server":
+            args = _build_internal_mcp_server_parser().parse_args(argv[1:])
+            return args.func(args)
+        if argv and argv[0] == "_gateway":
+            args = _build_internal_gateway_parser().parse_args(argv[1:])
+            return args.func(args)
+        if argv and argv[0] == "sandbox-bootstrap":
+            args = _build_internal_sandbox_bootstrap_parser().parse_args(argv[1:])
+            return args.func(args)
+
+        parser = build_parser()
+        args = parser.parse_args(argv)
         return args.func(args)
-    except (ConfigError, RunnerError, OSError, ValueError) as exc:
+    except (ConfigError, RunnerError, ServiceError, OSError, ValueError) as exc:
         exit_with_error(exc)
     return 0
 
@@ -209,7 +262,19 @@ def _cmd_run(args: argparse.Namespace) -> int:
     )
 
 
-def _cmd_serve_mcp(args: argparse.Namespace) -> int:
+def _cmd_up(args: argparse.Namespace) -> int:
+    if args.detach:
+        start_detached(args)
+        return 0
+    ensure_no_detached_service(args)
+    if args.port is None:
+        args.port = find_available_port(args.host, DEFAULT_MCP_PORT)
+    return _cmd_mcp_server(args)
+
+
+def _cmd_mcp_server(args: argparse.Namespace) -> int:
+    if args.port is None:
+        args.port = DEFAULT_MCP_PORT
     serve_mcp(
         ServeMcpOptions(
             config=args.config,
@@ -238,6 +303,21 @@ def _cmd_serve_mcp(args: argparse.Namespace) -> int:
             matchlock_allow_host=tuple(args.matchlock_allow_host or []),
         )
     )
+    return 0
+
+
+def _cmd_status(args: argparse.Namespace) -> int:
+    show_status(args)
+    return 0
+
+
+def _cmd_down(args: argparse.Namespace) -> int:
+    stop_detached(args)
+    return 0
+
+
+def _cmd_ls(args: argparse.Namespace) -> int:
+    list_services()
     return 0
 
 

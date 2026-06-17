@@ -53,7 +53,7 @@ print(sum_result.result)
             "--project",
             str(repo),
             "maco",
-            "serve",
+            "_gateway",
             "--config",
             str(config_path),
             "--workspace",
@@ -73,7 +73,7 @@ print(sum_result.result)
         while time.time() < deadline:
             if server.poll() is not None:
                 last_output += server.stdout.read() if server.stdout else ""
-                raise AssertionError(f"maco serve exited early:\n{last_output}")
+                raise AssertionError(f"maco _gateway exited early:\n{last_output}")
             if server.stdout:
                 # Drain a little without blocking only after file exists; output is useful on failure.
                 pass
@@ -89,7 +89,7 @@ print(sum_result.result)
         else:
             if server.stdout:
                 last_output += server.stdout.read()
-            raise AssertionError(f"maco serve did not become healthy:\n{last_output}")
+            raise AssertionError(f"maco _gateway did not become healthy:\n{last_output}")
 
         completed = subprocess.run(
             [

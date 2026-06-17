@@ -1,6 +1,6 @@
 # maco sandbox image
 
-This directory contains the Docker image used by the Docker and Matchlock `maco serve-mcp` sandbox providers.
+This directory contains the Docker image used by the Docker and Matchlock `maco up` sandbox providers.
 
 The image extends the pinned Alpine uv/Python image with the `maco` CLI, `ripgrep` (`rg`), and `fd`. Remote sandbox providers use the CLI to bootstrap `/workspace/macosdk/tools` from the live gateway catalog at sandbox startup.
 

@@ -1,15 +1,15 @@
 ---
 name: maco
-description: Use maco to access many MCP tools through a compact code-execution interface. Trigger when users want to run or configure maco serve-mcp, use MCP tools through bash/code_execute, run multi-step MCP workflows in Python, filter/join/page large MCP responses locally, or reduce MCP tool-schema context.
+description: Use maco to access many MCP tools through a compact code-execution interface. Trigger when users want to run or configure maco up, use MCP tools through bash/code_execute, run multi-step MCP workflows in Python, filter/join/page large MCP responses locally, or reduce MCP tool-schema context.
 ---
 
 # maco
 
 `maco` lets agents use many upstream MCP tools through a small code-execution surface. It follows the code-execution-with-MCP pattern: keep live MCP sessions and large schemas behind a gateway, then use Python for multi-step work without loading every tool definition into context.
 
-## Primary interface: `maco serve-mcp`
+## Primary interface: `maco up`
 
-Prefer MCP mode whenever possible. `maco serve-mcp` starts a managed gateway for the upstream MCP servers and exposes one Streamable HTTP MCP endpoint with two tools:
+Prefer MCP mode whenever possible. `maco up` starts a managed gateway for the upstream MCP servers and exposes one Streamable HTTP MCP endpoint with two tools:
 
 - `bash(command, timeout?)` — inspect generated wrappers or run small non-interactive probes in the sandbox.
 - `code_execute(code, filename?, args?, timeout?)` — run Python that imports generated MCP tools.
@@ -19,7 +19,7 @@ Agents thrive on discovery with `rg` and `fd`, so maco gives them `bash` access 
 Start it from this repository/skill directory or an installed package environment with:
 
 ```bash
-uv run maco serve-mcp --config mcp.json --provider local
+uv run maco up --config mcp.json --provider local
 ```
 
 Defaults:
@@ -32,7 +32,7 @@ Defaults:
 
 ## Client/agent workflow
 
-When connected to a `maco serve-mcp` endpoint, do not try to enumerate every upstream MCP schema. Work progressively:
+When connected to a `maco up` endpoint, do not try to enumerate every upstream MCP schema. Work progressively:
 
 1. Use the MCP `bash` tool with `rg`/`fd` for code navigation inside the sandbox:
 
@@ -154,7 +154,7 @@ For one simple direct MCP call, direct tool use may still be faster.
 
 ## Safety notes
 
-- `serve-mcp` exposes shell/Python execution to connected MCP clients; bind it only where intended.
+- `maco up` exposes shell/Python execution to connected MCP clients; bind it only where intended.
 - The managed gateway uses a bearer token by default. Do not commit `.maco/gateway.json`.
 - Sandbox providers change process/container/VM isolation, but upstream MCP servers still control their own permissions and side effects.
 - Generated wrappers are code. Inspect unfamiliar wrappers before calling them.
