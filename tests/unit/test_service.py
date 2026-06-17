@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -122,7 +121,7 @@ def test_stop_detached_removes_registry_and_sends_sigterm(tmp_path, monkeypatch)
     spec = _spec(project, pid=12345)
     spec_dir = tmp_path / "home" / ".maco" / "state" / "instances" / spec.id
     spec_dir.mkdir(parents=True)
-    (spec_dir / "spec.json").write_text(json.dumps(asdict(spec)), encoding="utf-8")
+    (spec_dir / "spec.json").write_text(spec.model_dump_json(), encoding="utf-8")
 
     signals = []
 
@@ -148,7 +147,7 @@ def test_list_services_prints_project_rows(tmp_path, monkeypatch, capsys):
     spec = _spec(project, pid=None)
     spec_dir = tmp_path / "home" / ".maco" / "state" / "instances" / spec.id
     spec_dir.mkdir(parents=True)
-    (spec_dir / "spec.json").write_text(json.dumps(asdict(spec)), encoding="utf-8")
+    (spec_dir / "spec.json").write_text(spec.model_dump_json(), encoding="utf-8")
 
     rows = service.list_services()
 

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
-import json
 import os
 from pathlib import Path
 import re
@@ -18,6 +16,8 @@ import sys
 import time
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 
 DEFAULT_MCP_PORT = 8789
 _MCP_SERVER_COMMAND = "_mcp-server"
@@ -27,9 +27,10 @@ class ServiceError(ValueError):
     """Raised when maco cannot manage a detached service."""
 
 
-@dataclass(frozen=True)
-class ServiceSpec:
+class ServiceSpec(BaseModel):
     """Persisted description of one project-scoped detached maco process."""
+
+    model_config = ConfigDict(frozen=True)
 
     id: str
     service_name: str
@@ -46,30 +47,6 @@ class ServiceSpec:
     stderr_log: str
     created_at: str
     updated_at: str
-
-    @classmethod
-    def from_json(cls, data: dict[str, Any]) -> ServiceSpec:
-        command = data.get("command")
-        if not isinstance(command, list) or not all(isinstance(part, str) for part in command):
-            raise ServiceError("service spec command must be a list of strings")
-        raw_pid = data.get("pid")
-        return cls(
-            id=str(data["id"]),
-            service_name=str(data["service_name"]),
-            project_dir=str(data["project_dir"]),
-            config=str(data["config"]),
-            workspace=str(data["workspace"]),
-            host=str(data["host"]),
-            port=int(data["port"]),
-            url=str(data["url"]),
-            provider=str(data["provider"]),
-            command=command,
-            pid=int(raw_pid) if raw_pid is not None else None,
-            stdout_log=str(data["stdout_log"]),
-            stderr_log=str(data["stderr_log"]),
-            created_at=str(data["created_at"]),
-            updated_at=str(data["updated_at"]),
-        )
 
 
 def start_detached(args: Any) -> ServiceSpec:
@@ -245,39 +222,18 @@ def _is_port_available(host: str, port: int) -> bool:
 
 def _serve_mcp_command(args: Any, *, config: Path, workspace: Path, port: int) -> list[str]:
     command = [sys.executable, "-m", "maco.cli", "_mcp-server"]
-
-    def add(flag: str, value: object | None) -> None:
-        if value is not None:
+    values = vars(args) | {"config": config, "workspace": workspace, "port": port}
+    for key, value in values.items():
+        if key in {"command", "func", "detach"} or value is None or value is False or value == []:
+            continue
+        flag = f"--{key.replace('_', '-')}"
+        if value is True:
+            command.append(flag)
+        elif isinstance(value, list):
+            for item in value:
+                command.extend([flag, str(item)])
+        else:
             command.extend([flag, str(value)])
-
-    add("--config", config)
-    add("--provider", getattr(args, "provider", "local"))
-    add("--workspace", workspace)
-    if getattr(args, "clean", False):
-        command.append("--clean")
-    add("--scratch", getattr(args, "scratch", None))
-    add("--gateway-file", getattr(args, "gateway_file", None))
-    add("--gateway-host", getattr(args, "gateway_host", None))
-    add("--gateway-port", getattr(args, "gateway_port", 0))
-    add("--gateway-token", getattr(args, "gateway_token", None))
-    if getattr(args, "no_gateway_token", False):
-        command.append("--no-gateway-token")
-    add("--host", getattr(args, "host", "127.0.0.1"))
-    add("--port", port)
-    add("--timeout", getattr(args, "timeout", 60))
-    if getattr(args, "debug", False):
-        command.append("--debug")
-    add("--image", getattr(args, "image", None))
-    add("--python-command", getattr(args, "python_command", None))
-    add("--docker-binary", getattr(args, "docker_binary", "docker"))
-    add("--docker-network", getattr(args, "docker_network", None))
-    add("--docker-gateway-host", getattr(args, "docker_gateway_host", "host.docker.internal"))
-    add("--docker-gateway-ip", getattr(args, "docker_gateway_ip", None))
-    add("--matchlock-binary", getattr(args, "matchlock_binary", "matchlock"))
-    add("--matchlock-gateway-host", getattr(args, "matchlock_gateway_host", "maco-gateway.internal"))
-    add("--matchlock-gateway-ip", getattr(args, "matchlock_gateway_ip", None))
-    for host in getattr(args, "matchlock_allow_host", []) or []:
-        add("--matchlock-allow-host", host)
     return command
 
 
@@ -370,15 +326,12 @@ def _command_parts_match(actual: list[str], expected: list[str]) -> bool:
 def _write_spec(spec: ServiceSpec) -> None:
     path = _spec_path(spec.id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(spec), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    path.write_text(spec.model_dump_json(indent=2) + "\n", encoding="utf-8")
     path.chmod(0o600)
 
 
 def _replace_pid(spec: ServiceSpec, pid: int) -> ServiceSpec:
-    data = asdict(spec)
-    data["pid"] = pid
-    data["updated_at"] = _now()
-    return ServiceSpec.from_json(data)
+    return spec.model_copy(update={"pid": pid, "updated_at": _now()})
 
 
 def _load_current_spec(args: Any) -> ServiceSpec | None:
@@ -392,10 +345,7 @@ def _load_spec(instance_id: str) -> ServiceSpec | None:
     if not path.exists():
         return None
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            raise ServiceError("service spec must be a JSON object")
-        return ServiceSpec.from_json(data)
+        return ServiceSpec.model_validate_json(path.read_text(encoding="utf-8"))
     except Exception as exc:
         raise ServiceError(f"failed to read maco service spec {path}: {exc}") from exc
 
@@ -406,9 +356,7 @@ def _load_all_specs() -> list[ServiceSpec]:
         return []
     specs: list[ServiceSpec] = []
     for path in sorted(root.glob("*/spec.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            specs.append(ServiceSpec.from_json(data))
+        specs.append(ServiceSpec.model_validate_json(path.read_text(encoding="utf-8")))
     return specs
 
 
