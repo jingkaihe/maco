@@ -8,7 +8,6 @@ on:
       - "src/**"
       - "pyproject.toml"
       - "uv.lock"
-      - "VERSION.txt"
       - "README.md"
       - "LICENSE"
   push:
@@ -20,7 +19,6 @@ on:
       - "src/**"
       - "pyproject.toml"
       - "uv.lock"
-      - "VERSION.txt"
       - "README.md"
       - "LICENSE"
   workflow_dispatch:
@@ -52,9 +50,9 @@ jobs:
         id: version
         shell: bash
         run: |
-          version="$(tr -d '[:space:]' < VERSION.txt)"
+          version="$(scripts/package-version)"
           if [[ -z "$version" ]]; then
-            echo "VERSION.txt must not be empty" >&2
+            echo "maco __version__ must not be empty" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"

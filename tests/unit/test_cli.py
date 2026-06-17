@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from maco import __version__
 import maco.cli as cli
 from maco.cli import build_parser, main
 
@@ -145,6 +146,4 @@ def test_version_command_prints_version_metadata(capsys):
     assert main(["version"]) == 0
 
     out = capsys.readouterr().out
-    assert "version: " in out
-    assert "commit: " in out
-    assert "release date: " in out
+    assert out == f"version: {__version__}\n"

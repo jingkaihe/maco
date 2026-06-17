@@ -27,8 +27,7 @@ dev = [
 ]
 
 [tool.hatch.version]
-path = "VERSION.txt"
-pattern = "(?P<version>.+)"
+path = "src/maco/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/maco"]
@@ -39,6 +38,5 @@ include = [
     "docs",
     "README.md",
     "LICENSE",
-    "VERSION.txt",
     "pyproject.toml",
 ]

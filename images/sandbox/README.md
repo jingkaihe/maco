@@ -7,14 +7,14 @@ The image extends the pinned Alpine uv/Python image with the `maco` CLI, `ripgre
 ## Build
 
 ```bash
-VERSION="$(cat VERSION.txt)"
+VERSION="$(scripts/package-version)"
 docker build -f images/sandbox/Dockerfile -t "ghcr.io/jingkaihe/maco:${VERSION}-alpine" .
 ```
 
 ## Import into Matchlock
 
 ```bash
-VERSION="$(cat VERSION.txt)"
+VERSION="$(scripts/package-version)"
 docker save "ghcr.io/jingkaihe/maco:${VERSION}-alpine" \
   | matchlock image import "ghcr.io/jingkaihe/maco:${VERSION}-alpine"
 ```

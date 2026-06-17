@@ -9,16 +9,15 @@ make check             # Run ruff, ty, and the full pytest suite
 make test-unit         # Run fast unit tests
 make test-integration  # Run end-to-end tests; may start real MCP/gateway/sandbox processes
 make build             # Build Python sdist/wheel
-make build-release     # Build wheel with embedded commit/date metadata, then reset local build info
 make clean-sandboxes   # Remove managed Docker containers and maco Matchlock sandboxes after interrupted runs
-make image             # Build sandbox image using VERSION.txt
+make image             # Build sandbox image using maco.__version__
 make image-import      # Build and import sandbox image into Matchlock
 uv run maco --help
 ```
 
 Use `uv run python -m ast path/to/file.py >/dev/null` as a targeted syntax-only smoke test for generated code or unusual dynamic-code changes.
 
-`VERSION.txt` is the single version source for the Python package and sandbox image tag. The Python distribution name is `mcp-as-code`; the import package and executable are `maco`. Python builds use Hatchling dynamic versioning from `VERSION.txt`; Docker image tags use `ghcr.io/<owner>/maco:<VERSION>-alpine`. Release builds call `scripts/write-build-info` before `uv build` so `maco version` reports the package version, commit SHA, and release date. Tag releases must use `v<VERSION>` and are handled by `.github/workflows/release.yml`, which publishes the Python package through PyPI trusted publishing/OIDC and pushes the GHCR image.
+`src/maco/__init__.py` (`maco.__version__`) is the single version source for the Python package and sandbox image tag. The Python distribution name is `mcp-as-code`; the import package and executable are `maco`. Python builds use Hatchling dynamic versioning from `maco.__version__`; Docker image tags use `ghcr.io/<owner>/maco:<VERSION>-alpine`. Tag releases must use `v<VERSION>` and are handled by `.github/workflows/release.yml`, which publishes the Python package through PyPI trusted publishing/OIDC and pushes the GHCR image.
 
 ## Structure
 

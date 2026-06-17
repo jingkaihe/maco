@@ -212,8 +212,6 @@ def main(argv: list[str] | None = None) -> int:
 def _cmd_version(args: argparse.Namespace) -> int:
     info = get_version_info()
     print(f"version: {info.version}")
-    print(f"commit: {info.commit_sha}")
-    print(f"release date: {info.release_date}")
     return 0
 
 

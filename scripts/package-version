@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Print the canonical maco package version."""
+
+from __future__ import annotations
+
+import ast
+from pathlib import Path
+
+
+def main() -> int:
+    repo = Path(__file__).resolve().parents[1]
+    init_path = repo / "src" / "maco" / "__init__.py"
+    module = ast.parse(init_path.read_text(encoding="utf-8"), filename=str(init_path))
+    for node in module.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str) and node.value.value:
+            print(node.value.value)
+            return 0
+        break
+    raise SystemExit(f"could not find non-empty __version__ in {init_path}")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
