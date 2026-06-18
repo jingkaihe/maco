@@ -18,8 +18,21 @@ from typing import Any
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from jinja2 import Template
+
 from .config import MacoConfig
 from .mcp_manager import MCPManager
+
+
+_GATEWAY_STARTED_TEMPLATE = Template(
+    """\
+maco gateway started
+  URL: {{ gateway.url }}
+  workspace: {{ gateway.workspace }}
+  gateway file: {{ gateway.gateway_file }}
+  press Ctrl+C to stop
+"""
+)
 
 
 @dataclass(frozen=True)
@@ -180,11 +193,7 @@ def serve(config: MacoConfig, options: ServeOptions) -> None:
     old_sigint = signal.signal(signal.SIGINT, _request_shutdown)
     old_sigterm = signal.signal(signal.SIGTERM, _request_shutdown)
     try:
-        print("maco gateway started")
-        print(f"  URL: {gateway.url}")
-        print(f"  workspace: {gateway.workspace}")
-        print(f"  gateway file: {gateway.gateway_file}")
-        print("  press Ctrl+C to stop")
+        print(_GATEWAY_STARTED_TEMPLATE.render(gateway=gateway).strip())
         stop_event.wait()
     finally:
         signal.signal(signal.SIGINT, old_sigint)

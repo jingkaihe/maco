@@ -39,6 +39,31 @@ _TEMPLATES = Environment(
     lstrip_blocks=True,
     undefined=StrictUndefined,
 )
+_MANAGED_GATEWAY_STARTED_TEMPLATE = _TEMPLATES.from_string(
+    """\
+maco gateway started
+  URL: {{ gateway.url }}
+{% for url in gateway.extra_urls %}
+  extra URL: {{ url }}
+{% endfor %}
+  gateway file: {{ gateway.gateway_file }}
+"""
+)
+_LOCAL_SDK_GENERATED_TEMPLATE = _TEMPLATES.from_string(
+    """\
+Generated local sandbox SDK with {{ stats.tool_count }} tools from {{ stats.server_count }} servers
+SDK workspace: {{ stats.workspace }}
+"""
+)
+_MCP_SERVER_STARTED_TEMPLATE = _TEMPLATES.from_string(
+    """\
+maco MCP server started
+  URL: http://{{ options.host }}:{{ options.port }}/mcp
+  provider: {{ options.provider }}
+  SDK: {{ provider.guest_workspace }}
+  scratch: {{ scratch }}
+"""
+)
 
 
 @dataclass(frozen=True)
@@ -155,19 +180,14 @@ def serve_mcp(options: ServeMcpOptions) -> None:
                 ),
             ),
         ).start()
-        print("maco gateway started")
-        print(f"  URL: {gateway_server.url}")
-        for url in gateway_server.extra_urls:
-            print(f"  extra URL: {url}")
-        print(f"  gateway file: {gateway_server.gateway_file}")
+        print(_MANAGED_GATEWAY_STARTED_TEMPLATE.render(gateway=gateway_server).strip())
         gateway = GatewayInfo(url=gateway_server.url, token=gateway_server.token)
         tools_by_server = fetch_gateway_tools(gateway.url, token=gateway.token)
         modules = sorted(server_module_names(tools_by_server.keys()).values())
         if options.provider.replace("_", "-").lower() == "local":
             _clean_local_sdk(workspace, clean=options.clean)
             stats = generate_sandbox_sdk(tools_by_server, workspace=workspace, clean=False)
-            print(f"Generated local sandbox SDK with {stats.tool_count} tools from {stats.server_count} servers")
-            print(f"SDK workspace: {stats.workspace}")
+            print(_LOCAL_SDK_GENERATED_TEMPLATE.render(stats=stats).strip())
         context = SandboxContext(
             workspace=workspace,
             scratch=scratch,
@@ -199,11 +219,7 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             detached_service_id=options.detached_service_id,
             detached_service_token=options.detached_service_token,
         )
-        print("maco MCP server started")
-        print(f"  URL: http://{options.host}:{options.port}/mcp")
-        print(f"  provider: {options.provider}")
-        print(f"  SDK: {provider.guest_workspace}")
-        print(f"  scratch: {scratch}")
+        print(_MCP_SERVER_STARTED_TEMPLATE.render(options=options, provider=provider, scratch=scratch).strip())
         app.run("streamable-http")
     except _ServeMcpShutdown:
         pass

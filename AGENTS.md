@@ -17,6 +17,8 @@ uv run maco --help
 
 Use `uv run python -m ast path/to/file.py >/dev/null` as a targeted syntax-only smoke test for generated code or unusual dynamic-code changes.
 
+For multi-line human-facing CLI output, prefer rendering a complete message block with an inline Jinja2 template over a run of piecemeal `print()` calls. Keep simple one-line messages, debug logging, and aligned tables straightforward.
+
 `src/maco/__init__.py` (`maco.__version__`) is the single version source for the Python package and sandbox image tag. The Python distribution name is `mcp-as-code`; the import package and executable are `maco`. Python builds use Hatchling dynamic versioning from `maco.__version__`; Docker image tags use `ghcr.io/<owner>/maco:<VERSION>-alpine`. Tag releases must use `v<VERSION>` and are handled by `.github/workflows/release.yml`, which publishes the Python package through PyPI trusted publishing/OIDC and pushes the GHCR image.
 
 ## Structure

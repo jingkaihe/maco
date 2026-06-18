@@ -18,6 +18,7 @@ import time
 from typing import Any
 
 import httpx
+from jinja2 import Template
 from pydantic import BaseModel, ConfigDict
 
 
@@ -51,6 +52,27 @@ _MCP_SERVER_COMMAND_KEYS = (
     "matchlock_gateway_host",
     "matchlock_gateway_ip",
     "matchlock_allow_host",
+)
+_SERVICE_STATUS_TEMPLATE = Template(
+    """\
+{{ message }}
+  project:    {{ spec.project_dir }}
+  service:    {{ spec.service_name }}
+  state:      {{ state }}
+  pid:        {{ spec.pid if spec.pid is not none else '-' }}
+  URL:        {{ spec.url }}
+  provider:   {{ spec.provider }}
+  config:     {{ spec.config }}
+  workspace:  {{ spec.workspace }}
+  stdout log: {{ spec.stdout_log }}
+  stderr log: {{ spec.stderr_log }}
+"""
+)
+_NO_CURRENT_SERVICE_TEMPLATE = Template(
+    """\
+maco is not running for this project
+Use `maco up -d` to start it, or `maco ls` to list other maco processes.
+"""
 )
 
 
@@ -117,8 +139,13 @@ def start_detached(args: Any) -> ServiceSpec:
 
     if existing is not None and existing_state == "running":
         if _spec_equivalent(existing, spec):
-            print("maco is already running for this project")
-            _print_spec_details(existing, state="running")
+            print(
+                _SERVICE_STATUS_TEMPLATE.render(
+                    message="maco is already running for this project",
+                    spec=existing,
+                    state="running",
+                ).strip()
+            )
             return existing
         if not _stop_process(existing):
             raise ServiceError(
@@ -136,8 +163,13 @@ def start_detached(args: Any) -> ServiceSpec:
         _terminate_spawned_process(process)
         raise
     _write_spec(spec)
-    print("Started maco detached process")
-    _print_spec_details(spec, state="running")
+    print(
+        _SERVICE_STATUS_TEMPLATE.render(
+            message="Started maco detached process",
+            spec=spec,
+            state="running",
+        ).strip()
+    )
     return spec
 
 
@@ -162,8 +194,13 @@ def stop_detached(args: Any) -> ServiceSpec | None:
             "leaving the registry entry in place because the process was not confirmed stopped"
         )
     shutil.rmtree(_instance_dir(spec.id), ignore_errors=True)
-    print("Stopped maco detached process")
-    _print_spec_details(spec, state="stopped")
+    print(
+        _SERVICE_STATUS_TEMPLATE.render(
+            message="Stopped maco detached process",
+            spec=spec,
+            state="stopped",
+        ).strip()
+    )
     return spec
 
 
@@ -172,15 +209,17 @@ def show_status(args: Any) -> ServiceSpec | None:
 
     spec = _load_current_spec(args)
     if spec is None:
-        print("maco is not running for this project")
-        print("Use `maco up -d` to start it, or `maco ls` to list other maco processes.")
+        print(_NO_CURRENT_SERVICE_TEMPLATE.render().strip())
         return None
     state = _process_state(spec)
-    if state == "running":
-        print("maco is running")
-    else:
-        print(f"maco is {state}")
-    _print_spec_details(spec, state=state)
+    message = "maco is running" if state == "running" else f"maco is {state}"
+    print(
+        _SERVICE_STATUS_TEMPLATE.render(
+            message=message,
+            spec=spec,
+            state=state,
+        ).strip()
+    )
     return spec
 
 
@@ -533,19 +572,6 @@ def _logs_root() -> Path:
 def _project_display(spec: ServiceSpec) -> str:
     suffix = "" if Path(spec.project_dir).exists() else " (missing)"
     return f"{spec.project_dir}{suffix}"
-
-
-def _print_spec_details(spec: ServiceSpec, *, state: str) -> None:
-    print(f"  project:    {spec.project_dir}")
-    print(f"  service:    {spec.service_name}")
-    print(f"  state:      {state}")
-    print(f"  pid:        {spec.pid if spec.pid is not None else '-'}")
-    print(f"  URL:        {spec.url}")
-    print(f"  provider:   {spec.provider}")
-    print(f"  config:     {spec.config}")
-    print(f"  workspace:  {spec.workspace}")
-    print(f"  stdout log: {spec.stdout_log}")
-    print(f"  stderr log: {spec.stderr_log}")
 
 
 def _slug(value: str) -> str:

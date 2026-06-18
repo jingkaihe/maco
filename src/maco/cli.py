@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import click
+from jinja2 import Template
 
 from .codegen import generate, generate_sandbox_sdk_from_gateway
 from .config import ConfigError, load_config
@@ -37,6 +38,13 @@ _RUN_CONTEXT_SETTINGS = {
     "allow_extra_args": True,
     "allow_interspersed_args": False,
 }
+_GENERATION_SUMMARY_TEMPLATE = Template(
+    """\
+{{ label }} {{ tool_count }} tools from {{ server_count }} servers
+Workspace: {{ workspace }}{% if explore_path %}
+Explore: rg --files {{ explore_path }}{% endif %}
+"""
+)
 
 
 def _serve_mcp_options(*, port_default: int | None = DEFAULT_MCP_PORT) -> Any:
@@ -301,17 +309,30 @@ def _cmd_gen(args: Any) -> int:
         server_filter=args.server,
         clean=args.clean,
     )
-    print(f"Generated {stats.tool_count} tools from {stats.server_count} servers")
-    print(f"Workspace: {stats.workspace}")
-    print("Explore: rg --files {}/maco_generated/servers".format(stats.workspace))
+    print(
+        _GENERATION_SUMMARY_TEMPLATE.render(
+            label="Generated",
+            tool_count=stats.tool_count,
+            server_count=stats.server_count,
+            workspace=stats.workspace,
+            explore_path=f"{stats.workspace}/maco_generated/servers",
+        ).strip()
+    )
     return 0
 
 
 def _cmd_serve(args: Any) -> int:
     config = load_config(args.config)
     stats = generate(config, workspace=args.workspace, clean=args.clean)
-    print(f"Generated {stats.tool_count} tools from {stats.server_count} servers")
-    print(f"Workspace: {stats.workspace}")
+    print(
+        _GENERATION_SUMMARY_TEMPLATE.render(
+            label="Generated",
+            tool_count=stats.tool_count,
+            server_count=stats.server_count,
+            workspace=stats.workspace,
+            explore_path=None,
+        ).strip()
+    )
     serve(
         config,
         ServeOptions(
@@ -408,9 +429,15 @@ def _cmd_sandbox_bootstrap(args: Any) -> int:
         workspace=args.workspace,
         clean=not args.no_clean,
     )
-    print(f"Generated sandbox SDK with {stats.tool_count} tools from {stats.server_count} servers")
-    print(f"Workspace: {stats.workspace}")
-    print(f"Explore: rg --files {stats.workspace}/tools")
+    print(
+        _GENERATION_SUMMARY_TEMPLATE.render(
+            label="Generated sandbox SDK with",
+            tool_count=stats.tool_count,
+            server_count=stats.server_count,
+            workspace=stats.workspace,
+            explore_path=f"{stats.workspace}/tools",
+        ).strip()
+    )
     return 0
 
 

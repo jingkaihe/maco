@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlparse
 import webbrowser
 
 import httpx
+from jinja2 import Template
 from mcp.client.auth.utils import (
     build_oauth_authorization_server_metadata_discovery_urls,
     build_protected_resource_metadata_discovery_urls,
@@ -43,6 +44,17 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 from pydantic import AnyUrl
 
 from .config import OAuthConfig, ServerConfig
+
+
+_OAUTH_AUTHORIZATION_TEMPLATE = Template(
+    """\
+{{ name }} requires OAuth authorization.{% if opening_browser %} Opening your browser...{% endif %}
+{% if browser_failed %}Could not open browser automatically.
+{% endif %}If your browser did not open, visit this URL:
+
+  {{ auth_url }}
+"""
+)
 
 
 CALLBACK_PATH = "/mcp/oauth/callback"
@@ -139,13 +151,17 @@ def _redirect_handler(server_name: str, oauth: OAuthConfig) -> Callable[[str], A
             )
 
         name = f"MCP server {server_name!r}" if server_name else "MCP server"
-        if open_browser(oauth):
-            print(f"{name} requires OAuth authorization. Opening your browser...", file=sys.stderr)
-            if not webbrowser.open(auth_url):
-                print("Could not open browser automatically.", file=sys.stderr)
-        else:
-            print(f"{name} requires OAuth authorization.", file=sys.stderr)
-        print(f"If your browser did not open, visit this URL:\n\n  {auth_url}\n", file=sys.stderr)
+        opening_browser = open_browser(oauth)
+        browser_failed = opening_browser and not webbrowser.open(auth_url)
+        print(
+            _OAUTH_AUTHORIZATION_TEMPLATE.render(
+                name=name,
+                opening_browser=opening_browser,
+                browser_failed=browser_failed,
+                auth_url=auth_url,
+            ).strip(),
+            file=sys.stderr,
+        )
 
     return redirect_handler
 
