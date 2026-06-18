@@ -2,6 +2,8 @@
 
 **Connect every MCP server you need, keeping your agent's context lean.**
 
+https://github.com/user-attachments/assets/4b91ea97-d48e-41c5-8189-0da8522ac459
+
 As the number of MCP servers you connect grows, tool schemas and intermediate tool call results clutter your agent's context. `maco` (mcp-as-code) collapses them all into a single endpoint with a programmatic interface.
 
 Instead of loading hundreds if not thousands of tool schemas upfront, `maco` reconstructs every MCP tool as Pydantic models and Python functions in a virtual filesystem and hands your agent just two of its favourite tools: `bash` to navigate, and `code_execute` to run. The agent discovers and composes tools as code, the thing frontier models do best.
