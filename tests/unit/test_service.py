@@ -287,6 +287,31 @@ def test_explicit_busy_port_is_rejected(tmp_path, monkeypatch):
         start_detached(_args(port=9000))
 
 
+def test_serve_mcp_command_only_forwards_server_options():
+    args = _args(
+        command="up",
+        detach=True,
+        unexpected="value",
+        matchlock_allow_host=("api.example.com", "cache.example.com"),
+    )
+
+    command = service._serve_mcp_command(
+        args,
+        config=Path("/project/mcp.json"),
+        workspace=Path("/project/.maco"),
+        port=8790,
+    )
+
+    assert command[:4] == [service.sys.executable, "-m", "maco.cli", "_mcp-server"]
+    assert "--command" not in command
+    assert "--detach" not in command
+    assert "--unexpected" not in command
+    assert command[command.index("--config") + 1] == "/project/mcp.json"
+    assert command[command.index("--workspace") + 1] == "/project/.maco"
+    assert command[command.index("--port") + 1] == "8790"
+    assert command.count("--matchlock-allow-host") == 2
+
+
 def _args(**overrides):
     values = {
         "config": "mcp.json",

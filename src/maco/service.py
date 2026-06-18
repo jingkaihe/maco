@@ -26,6 +26,32 @@ from .service_identity import SERVICE_ID_ENV, SERVICE_IDENTITY_PATH, SERVICE_TOK
 DEFAULT_MCP_PORT = 8789
 _DETACHED_STARTUP_TIMEOUT = 30.0
 _IDENTITY_REQUEST_TIMEOUT = 0.5
+_MCP_SERVER_COMMAND_KEYS = (
+    "config",
+    "provider",
+    "workspace",
+    "clean",
+    "scratch",
+    "gateway_file",
+    "gateway_host",
+    "gateway_port",
+    "gateway_token",
+    "no_gateway_token",
+    "host",
+    "port",
+    "timeout",
+    "debug",
+    "image",
+    "python_command",
+    "docker_binary",
+    "docker_network",
+    "docker_gateway_host",
+    "docker_gateway_ip",
+    "matchlock_binary",
+    "matchlock_gateway_host",
+    "matchlock_gateway_ip",
+    "matchlock_allow_host",
+)
 
 
 class ServiceError(ValueError):
@@ -234,19 +260,24 @@ def _is_port_available(host: str, port: int) -> bool:
 
 def _serve_mcp_command(args: Any, *, config: Path, workspace: Path, port: int) -> list[str]:
     command = [sys.executable, "-m", "maco.cli", "_mcp-server"]
-    values = vars(args) | {"config": config, "workspace": workspace, "port": port}
-    for key, value in values.items():
-        if key in {"command", "func", "detach"} or value is None or value is False or value == []:
-            continue
-        flag = f"--{key.replace('_', '-')}"
-        if value is True:
-            command.append(flag)
-        elif isinstance(value, list):
-            for item in value:
-                command.extend([flag, str(item)])
-        else:
-            command.extend([flag, str(value)])
+    overrides = {"config": config, "workspace": workspace, "port": port}
+    for key in _MCP_SERVER_COMMAND_KEYS:
+        value = overrides.get(key, getattr(args, key, None))
+        _append_cli_option(command, key, value)
     return command
+
+
+def _append_cli_option(command: list[str], key: str, value: Any) -> None:
+    if value is None or value is False or value == []:
+        return
+    flag = f"--{key.replace('_', '-')}"
+    if value is True:
+        command.append(flag)
+    elif isinstance(value, list | tuple):
+        for item in value:
+            command.extend([flag, str(item)])
+    else:
+        command.extend([flag, str(value)])
 
 
 def _spawn_detached(spec: ServiceSpec) -> subprocess.Popen[Any]:

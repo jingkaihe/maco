@@ -1,25 +1,25 @@
 from __future__ import annotations
 
 import pytest
+from click.testing import CliRunner
 
 from maco import __version__
 import maco.cli as cli
-from maco.cli import build_parser, main
+from maco.cli import build_cli, main
 
 
 def test_up_is_primary_sandboxed_mcp_command():
-    args = build_parser().parse_args(
-        [
-            "up",
-            "--config",
-            "mcp.json",
-            "--provider",
-            "docker",
-            "--workspace",
-            ".maco",
-            "--gateway-host",
-            "0.0.0.0",
-        ]
+    args = _captured_args(
+        "_cmd_up",
+        "up",
+        "--config",
+        "mcp.json",
+        "--provider",
+        "docker",
+        "--workspace",
+        ".maco",
+        "--gateway-host",
+        "0.0.0.0",
     )
 
     assert args.command == "up"
@@ -30,7 +30,7 @@ def test_up_is_primary_sandboxed_mcp_command():
 
 
 def test_up_foreground_uses_auto_marker_until_dispatch():
-    args = build_parser().parse_args(["up"])
+    args = _captured_args("_cmd_up", "up")
 
     assert args.command == "up"
     assert args.detach is False
@@ -38,19 +38,18 @@ def test_up_foreground_uses_auto_marker_until_dispatch():
 
 
 def test_up_detached_parses_mcp_server_options():
-    args = build_parser().parse_args(
-        [
-            "up",
-            "-d",
-            "--config",
-            "mcp.json",
-            "--provider",
-            "docker",
-            "--workspace",
-            ".maco",
-            "--gateway-host",
-            "0.0.0.0",
-        ]
+    args = _captured_args(
+        "_cmd_up",
+        "up",
+        "-d",
+        "--config",
+        "mcp.json",
+        "--provider",
+        "docker",
+        "--workspace",
+        ".maco",
+        "--gateway-host",
+        "0.0.0.0",
     )
 
     assert args.command == "up"
@@ -63,9 +62,9 @@ def test_up_detached_parses_mcp_server_options():
 
 
 def test_status_down_and_ls_commands_parse():
-    status = build_parser().parse_args(["status", "--workspace", "custom"])
-    down = build_parser().parse_args(["down", "--workspace", "custom"])
-    ls = build_parser().parse_args(["ls"])
+    status = _captured_args("_cmd_status", "status", "--workspace", "custom")
+    down = _captured_args("_cmd_down", "down", "--workspace", "custom")
+    ls = _captured_args("_cmd_ls", "ls")
 
     assert status.command == "status"
     assert status.workspace == "custom"
@@ -74,12 +73,11 @@ def test_status_down_and_ls_commands_parse():
     assert ls.command == "ls"
 
 
-def test_help_does_not_show_internal_commands(capsys):
-    with pytest.raises(SystemExit) as exc_info:
-        build_parser().parse_args(["--help"])
+def test_help_does_not_show_internal_commands():
+    result = CliRunner().invoke(build_cli(), ["--help"])
 
-    assert exc_info.value.code == 0
-    out = capsys.readouterr().out
+    assert result.exit_code == 0
+    out = result.output
     assert "_mcp-server" not in out
     assert "_gateway" not in out
     assert "sandbox-bootstrap" not in out
@@ -147,3 +145,30 @@ def test_version_command_prints_version_metadata(capsys):
 
     out = capsys.readouterr().out
     assert out == f"version: {__version__}\n"
+
+
+def test_run_preserves_script_args_after_separator():
+    args = _captured_args("_cmd_run", "run", "script.py", "--", "--flag", "value")
+
+    assert args.command == "run"
+    assert args.code_path == "script.py"
+    assert args.script_args == ["--", "--flag", "value"]
+
+
+def _captured_args(command_func: str, *argv: str):
+    captured = {}
+
+    def fake_command(args):
+        captured["args"] = args
+        return 0
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(cli, command_func, fake_command)
+    try:
+        result = CliRunner().invoke(build_cli(), list(argv), standalone_mode=False)
+    finally:
+        monkeypatch.undo()
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    return captured["args"]
