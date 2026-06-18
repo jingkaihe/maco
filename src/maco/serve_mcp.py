@@ -16,13 +16,12 @@ from typing import Annotated, Any
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
+from starlette.responses import JSONResponse
 
 from .codegen import fetch_gateway_tools, generate_sandbox_sdk, server_module_names
 from .config import load_config
 from .gateway import GatewayServer, ServeOptions
 from .sandbox import (
-    DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP,
-    DEFAULT_MATCHLOCK_GATEWAY_IP,
     GatewayInfo,
     SandboxContext,
     SandboxExec,
@@ -31,6 +30,7 @@ from .sandbox import (
     default_matchlock_gateway_ip,
     provider_from_name,
 )
+from .service import SERVICE_IDENTITY_PATH
 
 
 _TEMPLATES = Environment(
@@ -38,6 +38,31 @@ _TEMPLATES = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
     undefined=StrictUndefined,
+)
+_MANAGED_GATEWAY_STARTED_TEMPLATE = _TEMPLATES.from_string(
+    """\
+maco gateway started
+  URL: {{ gateway.url }}
+{% for url in gateway.extra_urls %}
+  extra URL: {{ url }}
+{% endfor %}
+  gateway file: {{ gateway.gateway_file }}
+"""
+)
+_LOCAL_SDK_GENERATED_TEMPLATE = _TEMPLATES.from_string(
+    """\
+Generated local sandbox SDK with {{ stats.tool_count }} tools from {{ stats.server_count }} servers
+SDK workspace: {{ stats.workspace }}
+"""
+)
+_MCP_SERVER_STARTED_TEMPLATE = _TEMPLATES.from_string(
+    """\
+maco MCP server started
+  URL: http://{{ options.host }}:{{ options.port }}/mcp
+  provider: {{ options.provider }}
+  SDK: {{ provider.guest_workspace }}
+  scratch: {{ scratch }}
+"""
 )
 
 
@@ -50,7 +75,6 @@ class ServeMcpOptions:
     workspace: str | Path = ".maco"
     clean: bool = False
     scratch: str | Path | None = None
-    gateway_file: str | Path | None = None
     gateway_host: str | None = None
     gateway_port: int = 0
     gateway_token: str | None = None
@@ -69,6 +93,8 @@ class ServeMcpOptions:
     matchlock_gateway_host: str = "maco-gateway.internal"
     matchlock_gateway_ip: str | None = None
     matchlock_allow_host: tuple[str, ...] = ()
+    detached_service_id: str | None = None
+    detached_service_token: str | None = None
 
 
 class _ServeMcpShutdown(KeyboardInterrupt):
@@ -80,7 +106,7 @@ def _install_shutdown_signal_handlers() -> tuple[tuple[int, Any], ...]:
         return ()
 
     def _request_shutdown(signum: int, _frame: FrameType | None) -> None:
-        print(f"\nreceived signal {signum}; stopping maco serve-mcp", file=sys.stderr)
+        print(f"\nreceived signal {signum}; stopping maco MCP server", file=sys.stderr)
         raise _ServeMcpShutdown
 
     return (
@@ -107,19 +133,12 @@ def serve_mcp(options: ServeMcpOptions) -> None:
         scratch = (
             Path(options.scratch).expanduser().resolve()
             if options.scratch is not None
-            else workspace.parent / "maco-serve-mcp"
-        )
-        gateway_file = (
-            Path(options.gateway_file).expanduser().resolve()
-            if options.gateway_file is not None
-            else workspace / "gateway.json"
+            else default_scratch_path(workspace)
         )
         normalized_provider = _normalize_provider(options.provider)
-        managed_gateway = options.gateway_file is None
         docker_gateway_ip = (
             _docker_gateway_ip(
                 options.docker_gateway_ip,
-                managed_gateway=managed_gateway,
                 docker_binary=options.docker_binary,
                 docker_network=options.docker_network,
             )
@@ -127,59 +146,48 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             else None
         )
         matchlock_gateway_ip = (
-            _matchlock_gateway_ip(
-                options.matchlock_gateway_ip,
-                managed_gateway=managed_gateway,
-                gateway_file=gateway_file,
-            )
+            options.matchlock_gateway_ip or default_matchlock_gateway_ip()
             if normalized_provider == "matchlock"
             else None
         )
-        if options.gateway_file is None:
-            config = load_config(options.config)
-            gateway_host = options.gateway_host or _default_gateway_host()
-            _validate_managed_gateway_bind(
-                normalized_provider,
-                explicit_gateway_host=options.gateway_host,
-                matchlock_gateway_ip=matchlock_gateway_ip,
-            )
-            extra_hosts = _gateway_extra_hosts(
-                normalized_provider,
-                docker_gateway_ip=docker_gateway_ip,
-                matchlock_gateway_ip=matchlock_gateway_ip,
-                explicit_gateway_host=options.gateway_host,
-            )
-            gateway_server = GatewayServer(
-                config,
-                ServeOptions(
-                    host=gateway_host,
-                    port=options.gateway_port,
-                    workspace=workspace,
-                    token=options.gateway_token,
-                    use_token=options.gateway_use_token,
+        config = load_config(options.config)
+        gateway_host = options.gateway_host or _default_gateway_host()
+        _validate_managed_gateway_bind(
+            normalized_provider,
+            explicit_gateway_host=options.gateway_host,
+            matchlock_gateway_ip=matchlock_gateway_ip,
+        )
+        extra_hosts = _gateway_extra_hosts(
+            normalized_provider,
+            docker_gateway_ip=docker_gateway_ip,
+            matchlock_gateway_ip=matchlock_gateway_ip,
+            explicit_gateway_host=options.gateway_host,
+        )
+        gateway_server = GatewayServer(
+            config,
+            ServeOptions(
+                host=gateway_host,
+                port=options.gateway_port,
+                workspace=workspace,
+                token=options.gateway_token,
+                use_token=options.gateway_use_token,
+                extra_hosts=extra_hosts,
+                freebind_hosts=_gateway_freebind_hosts(
+                    gateway_host,
                     extra_hosts=extra_hosts,
-                    freebind_hosts=_gateway_freebind_hosts(
-                        gateway_host,
-                        extra_hosts=extra_hosts,
-                        docker_gateway_ip=docker_gateway_ip,
-                        matchlock_gateway_ip=matchlock_gateway_ip,
-                    ),
+                    docker_gateway_ip=docker_gateway_ip,
+                    matchlock_gateway_ip=matchlock_gateway_ip,
                 ),
-            ).start()
-            gateway_file = gateway_server.gateway_file
-            print("maco gateway started")
-            print(f"  URL: {gateway_server.url}")
-            for url in gateway_server.extra_urls:
-                print(f"  extra URL: {url}")
-            print(f"  gateway file: {gateway_file}")
-        gateway = GatewayInfo.from_file(gateway_file)
+            ),
+        ).start()
+        print(_MANAGED_GATEWAY_STARTED_TEMPLATE.render(gateway=gateway_server).strip())
+        gateway = GatewayInfo(url=gateway_server.url, token=gateway_server.token)
         tools_by_server = fetch_gateway_tools(gateway.url, token=gateway.token)
         modules = sorted(server_module_names(tools_by_server.keys()).values())
         if options.provider.replace("_", "-").lower() == "local":
             _clean_local_sdk(workspace, clean=options.clean)
             stats = generate_sandbox_sdk(tools_by_server, workspace=workspace, clean=False)
-            print(f"Generated local sandbox SDK with {stats.tool_count} tools from {stats.server_count} servers")
-            print(f"SDK workspace: {stats.workspace}")
+            print(_LOCAL_SDK_GENERATED_TEMPLATE.render(stats=stats).strip())
         context = SandboxContext(
             workspace=workspace,
             scratch=scratch,
@@ -202,12 +210,16 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             matchlock_extra_allow_hosts=list(options.matchlock_allow_host),
         )
         provider.start()
-        app = create_serve_mcp_app(provider, context, server_modules=modules, host=options.host, port=options.port)
-        print("maco serve-mcp started")
-        print(f"  URL: http://{options.host}:{options.port}/mcp")
-        print(f"  provider: {options.provider}")
-        print(f"  SDK: {provider.guest_workspace}")
-        print(f"  scratch: {scratch}")
+        app = create_serve_mcp_app(
+            provider,
+            context,
+            server_modules=modules,
+            host=options.host,
+            port=options.port,
+            detached_service_id=options.detached_service_id,
+            detached_service_token=options.detached_service_token,
+        )
+        print(_MCP_SERVER_STARTED_TEMPLATE.render(options=options, provider=provider, scratch=scratch).strip())
         app.run("streamable-http")
     except _ServeMcpShutdown:
         pass
@@ -228,6 +240,8 @@ def create_serve_mcp_app(
     server_modules: list[str] | None = None,
     host: str = "127.0.0.1",
     port: int = 8789,
+    detached_service_id: str | None = None,
+    detached_service_token: str | None = None,
 ) -> FastMCP:
     """Create the MCP app used by ``serve_mcp``.
 
@@ -237,13 +251,24 @@ def create_serve_mcp_app(
     """
 
     app = FastMCP(
-        "maco-serve-mcp",
+        "maco",
         instructions=_mcp_instructions(provider, context, server_modules=server_modules),
         host=host,
         port=port,
         json_response=True,
         stateless_http=True,
     )
+
+    if detached_service_id and detached_service_token:
+
+        @app.custom_route(SERVICE_IDENTITY_PATH, methods=["GET"], include_in_schema=False)
+        async def identity(_request: Any) -> JSONResponse:
+            return JSONResponse(
+                {
+                    "id": detached_service_id,
+                    "identity_token": detached_service_token,
+                }
+            )
 
     @app.tool(description=_bash_description(provider, context, server_modules=server_modules))
     def bash(
@@ -302,6 +327,12 @@ def create_serve_mcp_app(
         return payload
 
     return app
+
+
+def default_scratch_path(workspace: Path) -> Path:
+    """Return the default writable scratch directory for a maco workspace."""
+
+    return workspace / "scratch"
 
 
 def _mcp_instructions(
@@ -393,7 +424,7 @@ def _validate_managed_gateway_bind(
         return
     raise ValueError(
         "matchlock managed gateway requires an explicit --gateway-host on this platform; "
-        "use --gateway-host 0.0.0.0 to expose the gateway to the sandbox, or pass --gateway-file"
+        "use --gateway-host 0.0.0.0 to expose the gateway to the sandbox"
     )
 
 
@@ -401,37 +432,14 @@ def _normalize_provider(provider: str) -> str:
     return provider.replace("_", "-").lower()
 
 
-def _matchlock_gateway_ip(
-    configured_ip: str | None,
-    *,
-    managed_gateway: bool,
-    gateway_file: Path,
-) -> str | None:
-    if configured_ip:
-        return configured_ip
-    if managed_gateway:
-        return default_matchlock_gateway_ip()
-    try:
-        gateway = GatewayInfo.from_file(gateway_file)
-    except Exception:
-        return None
-    host = _url_host(gateway.url)
-    if host in {DEFAULT_MATCHLOCK_GATEWAY_IP, DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP}:
-        return host
-    return None
-
-
 def _docker_gateway_ip(
     configured_ip: str | None,
     *,
-    managed_gateway: bool,
     docker_binary: str,
     docker_network: str | None,
 ) -> str | None:
     if configured_ip:
         return configured_ip
-    if not managed_gateway:
-        return None
     if _is_docker_desktop(docker_binary):
         return None
     detected_ip = _detect_docker_gateway_ip(docker_binary, docker_network)
@@ -535,12 +543,6 @@ def _provider_gateway_ip(
     if provider == "matchlock":
         return matchlock_gateway_ip
     return None
-
-
-def _url_host(url: str) -> str | None:
-    from urllib.parse import urlsplit
-
-    return urlsplit(url).hostname
 
 
 def _result_payload(result: SandboxRunResult) -> dict[str, Any]:

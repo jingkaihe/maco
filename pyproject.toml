@@ -6,6 +6,8 @@ readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
+    "click>=8.1",
+    "httpx>=0.28",
     "jinja2>=3.1",
     "matchlock==0.2.15",
     "mcp>=1.24.0",
@@ -27,8 +29,7 @@ dev = [
 ]
 
 [tool.hatch.version]
-path = "VERSION.txt"
-pattern = "(?P<version>.+)"
+path = "src/maco/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/maco"]
@@ -39,6 +40,5 @@ include = [
     "docs",
     "README.md",
     "LICENSE",
-    "VERSION.txt",
     "pyproject.toml",
 ]

@@ -1,7 +1,7 @@
-VERSION := $(shell tr -d '[:space:]' < VERSION.txt)
+VERSION := $(shell scripts/package-version)
 IMAGE ?= ghcr.io/jingkaihe/maco:$(VERSION)-alpine
 
-.PHONY: help sync lint type test test-unit test-integration check build build-release clean clean-sandboxes clean-docker-sandboxes clean-matchlock-sandboxes image image-import version build-info-reset release-tag
+.PHONY: help sync lint type test test-unit test-integration check build clean clean-sandboxes clean-docker-sandboxes clean-matchlock-sandboxes image image-import version release-tag
 
 help:
 	@printf '%s\n' \
@@ -14,13 +14,11 @@ help:
 	  '  make test-integration  Run integration tests' \
 	  '  make check         Run lint, type, and tests' \
 	  '  make build         Build Python sdist/wheel' \
-	  '  make build-release Build wheel with embedded commit/date metadata' \
 	  '  make clean-sandboxes Remove leaked maco Docker/Matchlock sandboxes' \
-	  '  make image         Build sandbox image using VERSION.txt' \
+	  '  make image         Build sandbox image using maco.__version__' \
 	  '  make image-import  Build and import sandbox image into Matchlock' \
 	  '  make version       Print maco version metadata' \
-	  '  make build-info-reset Reset local build metadata to unreleased defaults' \
-	  '  make release-tag   Create a local v$$(cat VERSION.txt) git tag' \
+	  '  make release-tag   Create a local v$$(scripts/package-version) git tag' \
 	  '  make clean         Remove local build/test artifacts'
 
 sync:
@@ -45,11 +43,6 @@ check: lint type test
 
 build:
 	uv build
-
-build-release:
-	python scripts/write-build-info
-	uv build
-	python scripts/write-build-info --reset
 
 clean:
 	rm -rf build dist src/*.egg-info .pytest_cache .ruff_cache
@@ -80,9 +73,6 @@ image-import: image
 
 version:
 	uv run maco version
-
-build-info-reset:
-	python scripts/write-build-info --reset
 
 release-tag:
 	test -n "$(VERSION)"

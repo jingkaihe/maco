@@ -28,21 +28,18 @@ jobs:
         id: version
         shell: bash
         run: |
-          version="$(tr -d '[:space:]' < VERSION.txt)"
+          version="$(scripts/package-version)"
           tag="${GITHUB_REF_NAME}"
           if [[ -z "$version" ]]; then
-            echo "VERSION.txt must not be empty" >&2
+            echo "maco __version__ must not be empty" >&2
             exit 1
           fi
           if [[ "$tag" != "v${version}" ]]; then
-            echo "Tag $tag does not match VERSION.txt ($version); expected v${version}" >&2
+            echo "Tag $tag does not match maco __version__ ($version); expected v${version}" >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "image_tag=${version}-alpine" >> "$GITHUB_OUTPUT"
-
-      - name: Write release build metadata
-        run: python scripts/write-build-info --commit "$GITHUB_SHA"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0

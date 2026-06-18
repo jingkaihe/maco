@@ -1,4 +1,4 @@
-"""Sandbox providers for maco serve-mcp execution."""
+"""Sandbox providers for maco MCP server execution."""
 
 from .core import (
     DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP,

@@ -1,6 +1,6 @@
 # MCP configuration
 
-`maco` reads Claude-style MCP configuration files with a top-level `mcpServers` object. The same config is used by `maco gen`, `maco serve`, and `maco serve-mcp`.
+`maco` reads Claude-style MCP configuration files with a top-level `mcpServers` object. The same config is used by `maco gen` and `maco up`.
 
 ```json
 {

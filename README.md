@@ -89,7 +89,7 @@ This config needs `npx` (for Playwright MCP), a GitHub token in `GITHUB_TOKEN`, 
 Start the `maco` MCP server:
 
 ```bash
-maco serve-mcp --config mcp.json --provider docker
+maco up --config mcp.json --provider docker
 ```
 
 Use `--provider local` for a faster, non-isolated local feedback loop.

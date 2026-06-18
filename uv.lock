@@ -407,6 +407,8 @@ wheels = [
 name = "mcp-as-code"
 source = { editable = "." }
 dependencies = [
+    { name = "click" },
+    { name = "httpx" },
     { name = "jinja2" },
     { name = "matchlock" },
     { name = "mcp" },
@@ -422,6 +424,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "click", specifier = ">=8.1" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "matchlock", specifier = "==0.2.15" },
     { name = "mcp", specifier = ">=1.24.0" },

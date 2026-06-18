@@ -32,7 +32,7 @@ def call_mcp_tool(
     url = gateway.get("url")
     if not url:
         raise RuntimeError(
-            "maco gateway URL is not configured. Start `maco serve` and run code with `maco run`, "
+            "maco gateway URL is not configured. Start `maco up` and run code with `maco run`, "
             "or set MACO_GATEWAY_URL."
         )
 
@@ -101,4 +101,3 @@ def _content_text(result: dict[str, Any]) -> str:
         else:
             parts.append(str(block))
     return "".join(parts)
-

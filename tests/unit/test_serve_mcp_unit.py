@@ -7,6 +7,7 @@ import re
 import subprocess
 
 import pytest
+from starlette.testclient import TestClient
 
 from maco.sandbox import GatewayInfo, SandboxContext, SandboxExec, SandboxRunResult
 import maco.serve_mcp as serve_mcp_module
@@ -19,11 +20,11 @@ from maco.serve_mcp import (
     _docker_gateway_ip,
     _gateway_extra_hosts,
     _is_docker_desktop,
-    _matchlock_gateway_ip,
     _mcp_instructions,
     _result_payload,
     _validate_managed_gateway_bind,
     create_serve_mcp_app,
+    default_scratch_path,
 )
 
 
@@ -38,6 +39,12 @@ def test_serve_mcp_code_execute_uses_provider_script_command(tmp_path):
 
     assert provider.writes == [("task.py", "print('hello')")]
     assert provider.requests[0].command == "python /workspace/task.py"
+
+
+def test_default_scratch_path_lives_under_workspace(tmp_path):
+    workspace = tmp_path / ".maco"
+
+    assert default_scratch_path(workspace) == workspace / "scratch"
 
 
 def test_serve_mcp_code_execute_omitted_filename_uses_deterministic_path(tmp_path):
@@ -60,6 +67,23 @@ def test_result_payload_contains_only_tool_output_fields():
     payload = _result_payload(SandboxRunResult(0, "out", ""))
 
     assert payload == {"ok": True, "exit_code": 0, "stdout": "out", "stderr": ""}
+
+
+def test_serve_mcp_identity_route_returns_detached_identity(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    app = create_serve_mcp_app(
+        provider,
+        context,
+        detached_service_id="project-123",
+        detached_service_token="identity-token",
+    )
+
+    with TestClient(app.streamable_http_app()) as client:
+        response = client.get("/_maco/identity")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "project-123", "identity_token": "identity-token"}
 
 
 def test_serve_mcp_instructions_list_server_modules_and_rg_fd_discovery(tmp_path):
@@ -145,11 +169,11 @@ def test_bash_description_uses_concrete_wrapper_paths_without_gateway_details(tm
     assert "PYTHONPATH" not in description
 
 
-def test_matchlock_managed_gateway_defaults_to_linux_tap_gateway(tmp_path, monkeypatch):
+def test_matchlock_managed_gateway_defaults_to_linux_tap_gateway(monkeypatch):
     monkeypatch.setattr(serve_mcp_module.sys, "platform", "linux")
 
     assert _default_gateway_host() == "127.0.0.1"
-    gateway_ip = _matchlock_gateway_ip(None, managed_gateway=True, gateway_file=tmp_path / "missing.json")
+    gateway_ip = serve_mcp_module.default_matchlock_gateway_ip()
 
     assert gateway_ip == "192.168.100.1"
     assert _gateway_extra_hosts(
@@ -160,10 +184,10 @@ def test_matchlock_managed_gateway_defaults_to_linux_tap_gateway(tmp_path, monke
     ) == ("192.168.100.1",)
 
 
-def test_matchlock_managed_gateway_defaults_to_macos_nat_gateway(tmp_path, monkeypatch):
+def test_matchlock_managed_gateway_defaults_to_macos_nat_gateway(monkeypatch):
     monkeypatch.setattr(serve_mcp_module.sys, "platform", "darwin")
 
-    gateway_ip = _matchlock_gateway_ip(None, managed_gateway=True, gateway_file=tmp_path / "missing.json")
+    gateway_ip = serve_mcp_module.default_matchlock_gateway_ip()
 
     assert gateway_ip == "192.168.64.1"
 
@@ -195,27 +219,12 @@ def test_matchlock_managed_gateway_can_use_default_bind_with_freebind(monkeypatc
     )
 
 
-def test_matchlock_external_local_gateway_file_does_not_guess_gateway_ip(tmp_path):
-    gateway_file = tmp_path / "gateway.json"
-    gateway_file.write_text(json.dumps({"url": "http://127.0.0.1:12345/"}), encoding="utf-8")
-
-    assert _matchlock_gateway_ip(None, managed_gateway=False, gateway_file=gateway_file) is None
-
-
-def test_matchlock_external_macos_gateway_file_reuses_gateway_ip(tmp_path):
-    gateway_file = tmp_path / "gateway.json"
-    gateway_file.write_text(json.dumps({"url": "http://192.168.64.1:12345/"}), encoding="utf-8")
-
-    assert _matchlock_gateway_ip(None, managed_gateway=False, gateway_file=gateway_file) == "192.168.64.1"
-
-
 def test_docker_managed_gateway_defaults_to_local_bind_plus_bridge_extra_host(monkeypatch):
     monkeypatch.setattr(serve_mcp_module, "_is_docker_desktop", lambda _binary: False)
     monkeypatch.setattr(serve_mcp_module, "_detect_docker_gateway_ip", lambda _binary, _network: "172.18.0.1")
 
     gateway_ip = _docker_gateway_ip(
         None,
-        managed_gateway=True,
         docker_binary="docker-test",
         docker_network="test-network",
     )
@@ -240,7 +249,6 @@ def test_docker_managed_gateway_preserves_docker_desktop_alias(monkeypatch):
 
     gateway_ip = _docker_gateway_ip(
         None,
-        managed_gateway=True,
         docker_binary="docker-test",
         docker_network=None,
     )
@@ -261,22 +269,9 @@ def test_docker_managed_gateway_requires_detected_native_linux_gateway(monkeypat
     with pytest.raises(ValueError, match="pass --docker-gateway-ip"):
         _docker_gateway_ip(
             None,
-            managed_gateway=True,
             docker_binary="docker-test",
             docker_network="custom-net",
         )
-
-
-def test_docker_external_gateway_file_does_not_guess_gateway_ip():
-    assert (
-        _docker_gateway_ip(
-            None,
-            managed_gateway=False,
-            docker_binary="docker-test",
-            docker_network=None,
-        )
-        is None
-    )
 
 
 def test_is_docker_desktop_uses_docker_operating_system(monkeypatch):

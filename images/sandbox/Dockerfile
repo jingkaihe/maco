@@ -6,7 +6,7 @@ RUN apk add --no-cache \
     fd \
     ripgrep
 
-COPY pyproject.toml uv.lock README.md LICENSE VERSION.txt ./
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
 
 RUN UV_NO_CACHE=1 uv pip install --system . \

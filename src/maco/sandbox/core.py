@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from importlib.metadata import PackageNotFoundError, version
 import json
 import os
 from pathlib import Path
@@ -18,22 +17,15 @@ class SandboxError(RuntimeError):
 
 def _maco_version() -> str:
     try:
-        return version("mcp-as-code")
-    except PackageNotFoundError:
-        for parent in Path(__file__).resolve().parents:
-            version_file = parent / "VERSION.txt"
-            if version_file.exists():
-                return version_file.read_text(encoding="utf-8").strip()
-        try:
-            from maco import __version__
-        except ImportError:
-            pass
-        else:
-            if __version__:
-                return __version__
-        raise SandboxError(
-            "cannot determine the default sandbox image; pass --image explicitly"
-        ) from None
+        from maco import __version__
+    except ImportError:
+        pass
+    else:
+        if __version__:
+            return __version__
+    raise SandboxError(
+        "cannot determine the default sandbox image; pass --image explicitly"
+    ) from None
 
 
 def default_sandbox_image() -> str:
