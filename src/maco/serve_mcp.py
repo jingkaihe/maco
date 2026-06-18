@@ -32,7 +32,7 @@ from .sandbox import (
     default_matchlock_gateway_ip,
     provider_from_name,
 )
-from .service_identity import SERVICE_IDENTITY_PATH
+from .service import SERVICE_IDENTITY_PATH
 
 
 _TEMPLATES = Environment(

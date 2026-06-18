@@ -18,6 +18,8 @@ from .serve_mcp import ServeMcpOptions, serve_mcp
 from .service import (
     DEFAULT_MCP_PORT,
     ServiceError,
+    SERVICE_ID_ENV,
+    SERVICE_TOKEN_ENV,
     ensure_no_detached_service,
     find_available_port,
     list_services,
@@ -25,7 +27,6 @@ from .service import (
     start_detached,
     stop_detached,
 )
-from .service_identity import SERVICE_ID_ENV, SERVICE_TOKEN_ENV
 from .version import get_version_info
 
 
