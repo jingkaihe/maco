@@ -22,6 +22,7 @@ from .service import (
     start_detached,
     stop_detached,
 )
+from .service_identity import SERVICE_ID_ENV, SERVICE_TOKEN_ENV
 from .version import get_version_info
 
 
@@ -299,6 +300,8 @@ def _cmd_mcp_server(args: argparse.Namespace) -> int:
             matchlock_gateway_host=args.matchlock_gateway_host,
             matchlock_gateway_ip=args.matchlock_gateway_ip,
             matchlock_allow_host=tuple(args.matchlock_allow_host or []),
+            detached_service_id=os.environ.get(SERVICE_ID_ENV),
+            detached_service_token=os.environ.get(SERVICE_TOKEN_ENV),
         )
     )
     return 0

@@ -7,6 +7,7 @@ import hashlib
 import os
 from pathlib import Path
 import re
+import secrets
 import shlex
 import shutil
 import signal
@@ -16,11 +17,15 @@ import sys
 import time
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, ConfigDict
+
+from .service_identity import SERVICE_ID_ENV, SERVICE_IDENTITY_PATH, SERVICE_TOKEN_ENV
 
 
 DEFAULT_MCP_PORT = 8789
-_MCP_SERVER_COMMAND = "_mcp-server"
+_DETACHED_STARTUP_TIMEOUT = 30.0
+_IDENTITY_REQUEST_TIMEOUT = 0.5
 
 
 class ServiceError(ValueError):
@@ -42,6 +47,7 @@ class ServiceSpec(BaseModel):
     url: str
     provider: str
     command: list[str]
+    identity_token: str | None = None
     pid: int | None
     stdout_log: str
     stderr_log: str
@@ -75,6 +81,7 @@ def start_detached(args: Any) -> ServiceSpec:
         url=f"http://{getattr(args, 'host', '127.0.0.1')}:{port}/mcp",
         provider=str(getattr(args, "provider", "local")),
         command=command,
+        identity_token=secrets.token_urlsafe(32),
         pid=existing.pid if existing is not None and existing_state == "running" else None,
         stdout_log=str(_logs_root() / f"{instance_id}.out.log"),
         stderr_log=str(_logs_root() / f"{instance_id}.err.log"),
@@ -93,6 +100,11 @@ def start_detached(args: Any) -> ServiceSpec:
     _logs_root().mkdir(parents=True, exist_ok=True)
     process = _spawn_detached(spec)
     spec = _replace_pid(spec, process.pid)
+    try:
+        _wait_for_service_identity(spec, process)
+    except Exception:
+        _terminate_spawned_process(process)
+        raise
     _write_spec(spec)
     print("Started maco detached process")
     _print_spec_details(spec, state="running")
@@ -243,6 +255,7 @@ def _spawn_detached(spec: ServiceSpec) -> subprocess.Popen[Any]:
     try:
         kwargs: dict[str, Any] = {
             "cwd": spec.project_dir,
+            "env": _spawn_environment(spec),
             "stdin": subprocess.DEVNULL,
             "stdout": stdout,
             "stderr": stderr,
@@ -261,15 +274,19 @@ def _spawn_detached(spec: ServiceSpec) -> subprocess.Popen[Any]:
 def _stop_process(spec: ServiceSpec) -> None:
     if spec.pid is None:
         return
+    if not _endpoint_matches_spec(spec):
+        return
     try:
         os.kill(spec.pid, signal.SIGTERM)
     except ProcessLookupError:
         return
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        if _process_state(spec) != "running":
+        if not _pid_exists(spec.pid):
             return
         time.sleep(0.1)
+    if not _endpoint_matches_spec(spec):
+        return
     try:
         os.kill(spec.pid, signal.SIGKILL)
     except ProcessLookupError:
@@ -285,42 +302,103 @@ def _process_state(spec: ServiceSpec | None) -> str:
         return "stopped"
     except PermissionError:
         return "unknown"
-    if not _pid_matches_spec(spec):
+    if not _endpoint_matches_spec(spec):
         return "stale"
     return "running"
 
 
-def _pid_matches_spec(spec: ServiceSpec) -> bool:
-    if spec.pid is None:
-        return False
-    proc_cmdline = Path(f"/proc/{spec.pid}/cmdline")
-    if proc_cmdline.exists():
-        try:
-            parts = [part.decode() for part in proc_cmdline.read_bytes().split(b"\0") if part]
-        except OSError:
-            parts = []
-        if parts:
-            return _command_parts_match(parts, spec.command)
+def _spawn_environment(spec: ServiceSpec) -> dict[str, str]:
+    env = os.environ.copy()
+    env[SERVICE_ID_ENV] = spec.id
+    if spec.identity_token:
+        env[SERVICE_TOKEN_ENV] = spec.identity_token
+    return env
 
+
+def _wait_for_service_identity(
+    spec: ServiceSpec,
+    process: subprocess.Popen[Any],
+    *,
+    timeout: float = _DETACHED_STARTUP_TIMEOUT,
+) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        returncode = process.poll()
+        if returncode is not None:
+            raise ServiceError(
+                f"detached maco process exited during startup with code {returncode}"
+                f"{_startup_log_hint(spec)}"
+            )
+        if _endpoint_matches_spec(spec):
+            return
+        time.sleep(0.2)
+    raise ServiceError(f"detached maco process did not become ready within {timeout:g}s{_startup_log_hint(spec)}")
+
+
+def _endpoint_matches_spec(spec: ServiceSpec) -> bool:
+    if spec.pid is None or not spec.identity_token:
+        return False
     try:
-        completed = subprocess.run(
-            ["ps", "-p", str(spec.pid), "-o", "command="],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-    except OSError:
-        return True
-    if completed.returncode != 0:
+        response = httpx.get(_identity_url(spec), timeout=_IDENTITY_REQUEST_TIMEOUT, trust_env=False)
+        response.raise_for_status()
+        payload = response.json()
+    except (httpx.HTTPError, ValueError):
         return False
-    command_text = completed.stdout or ""
-    return "maco.cli" in command_text and _MCP_SERVER_COMMAND in command_text
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("id") == spec.id and payload.get("identity_token") == spec.identity_token
 
 
-def _command_parts_match(actual: list[str], expected: list[str]) -> bool:
-    if actual == expected:
+def _identity_url(spec: ServiceSpec) -> str:
+    host = spec.host
+    if host in {"", "0.0.0.0"}:
+        host = "127.0.0.1"
+    elif host == "::":
+        host = "::1"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{spec.port}{SERVICE_IDENTITY_PATH}"
+
+
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
         return True
-    return "-m" in actual and "maco.cli" in actual and _MCP_SERVER_COMMAND in actual
+    return True
+
+
+def _terminate_spawned_process(process: subprocess.Popen[Any]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def _startup_log_hint(spec: ServiceSpec) -> str:
+    detail = _tail_file(Path(spec.stderr_log))
+    if not detail:
+        detail = _tail_file(Path(spec.stdout_log))
+    if not detail:
+        return f"; see logs: {spec.stderr_log}"
+    return f":\n{detail}"
+
+
+def _tail_file(path: Path, *, limit: int = 4000) -> str:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            handle.seek(max(0, size - limit))
+            return handle.read().decode("utf-8", errors="replace").strip()
+    except OSError:
+        return ""
 
 
 def _write_spec(spec: ServiceSpec) -> None:

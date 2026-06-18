@@ -16,6 +16,7 @@ from typing import Annotated, Any
 from jinja2 import Environment, PackageLoader, StrictUndefined
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
+from starlette.responses import JSONResponse
 
 from .codegen import fetch_gateway_tools, generate_sandbox_sdk, server_module_names
 from .config import load_config
@@ -31,6 +32,7 @@ from .sandbox import (
     default_matchlock_gateway_ip,
     provider_from_name,
 )
+from .service_identity import SERVICE_IDENTITY_PATH
 
 
 _TEMPLATES = Environment(
@@ -69,6 +71,8 @@ class ServeMcpOptions:
     matchlock_gateway_host: str = "maco-gateway.internal"
     matchlock_gateway_ip: str | None = None
     matchlock_allow_host: tuple[str, ...] = ()
+    detached_service_id: str | None = None
+    detached_service_token: str | None = None
 
 
 class _ServeMcpShutdown(KeyboardInterrupt):
@@ -202,7 +206,15 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             matchlock_extra_allow_hosts=list(options.matchlock_allow_host),
         )
         provider.start()
-        app = create_serve_mcp_app(provider, context, server_modules=modules, host=options.host, port=options.port)
+        app = create_serve_mcp_app(
+            provider,
+            context,
+            server_modules=modules,
+            host=options.host,
+            port=options.port,
+            detached_service_id=options.detached_service_id,
+            detached_service_token=options.detached_service_token,
+        )
         print("maco MCP server started")
         print(f"  URL: http://{options.host}:{options.port}/mcp")
         print(f"  provider: {options.provider}")
@@ -228,6 +240,8 @@ def create_serve_mcp_app(
     server_modules: list[str] | None = None,
     host: str = "127.0.0.1",
     port: int = 8789,
+    detached_service_id: str | None = None,
+    detached_service_token: str | None = None,
 ) -> FastMCP:
     """Create the MCP app used by ``serve_mcp``.
 
@@ -244,6 +258,17 @@ def create_serve_mcp_app(
         json_response=True,
         stateless_http=True,
     )
+
+    if detached_service_id and detached_service_token:
+
+        @app.custom_route(SERVICE_IDENTITY_PATH, methods=["GET"], include_in_schema=False)
+        async def identity(_request: Any) -> JSONResponse:
+            return JSONResponse(
+                {
+                    "id": detached_service_id,
+                    "identity_token": detached_service_token,
+                }
+            )
 
     @app.tool(description=_bash_description(provider, context, server_modules=server_modules))
     def bash(

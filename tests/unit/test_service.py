@@ -44,6 +44,7 @@ def test_start_detached_auto_assigns_port_and_writes_spec(tmp_path, monkeypatch)
         return SimpleNamespace(pid=12345)
 
     monkeypatch.setattr(service, "_spawn_detached", fake_spawn)
+    monkeypatch.setattr(service, "_wait_for_service_identity", lambda _spec, _process: None)
 
     spec = start_detached(_args())
 
@@ -56,6 +57,7 @@ def test_start_detached_auto_assigns_port_and_writes_spec(tmp_path, monkeypatch)
     data = json.loads((tmp_path / "home" / ".maco" / "state" / "instances" / spec.id / "spec.json").read_text())
     assert data["pid"] == 12345
     assert data["port"] == 8790
+    assert data["identity_token"] == spec.identity_token
 
 
 def test_start_detached_is_idempotent_when_existing_process_matches(tmp_path, monkeypatch):
@@ -66,7 +68,8 @@ def test_start_detached_is_idempotent_when_existing_process_matches(tmp_path, mo
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(service, "_is_port_available", lambda _host, _port: True)
     monkeypatch.setattr(service.os, "kill", lambda _pid, _signal: None)
-    monkeypatch.setattr(service, "_pid_matches_spec", lambda _spec: True)
+    monkeypatch.setattr(service, "_endpoint_matches_spec", lambda _spec: True)
+    monkeypatch.setattr(service, "_wait_for_service_identity", lambda _spec, _process: None)
 
     spawn_count = 0
 
@@ -92,6 +95,7 @@ def test_start_detached_restarts_when_existing_options_change(tmp_path, monkeypa
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(service, "_is_port_available", lambda _host, _port: True)
     monkeypatch.setattr(service, "_process_state", lambda spec: "running" if spec and spec.pid else "stopped")
+    monkeypatch.setattr(service, "_wait_for_service_identity", lambda _spec, _process: None)
 
     stopped = []
 
@@ -131,12 +135,33 @@ def test_stop_detached_removes_registry_and_sends_sigterm(tmp_path, monkeypatch)
             raise ProcessLookupError
 
     monkeypatch.setattr(service.os, "kill", fake_kill)
-    monkeypatch.setattr(service, "_pid_matches_spec", lambda _spec: True)
+    monkeypatch.setattr(service, "_endpoint_matches_spec", lambda _spec: True)
     monkeypatch.setattr(service.time, "sleep", lambda _seconds: None)
 
     service.stop_detached(_args())
 
     assert (12345, service.signal.SIGTERM) in signals
+    assert not spec_dir.exists()
+
+
+def test_stop_detached_does_not_signal_unverified_pid(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    spec = _spec(project, pid=12345)
+    spec_dir = tmp_path / "home" / ".maco" / "state" / "instances" / spec.id
+    spec_dir.mkdir(parents=True)
+    (spec_dir / "spec.json").write_text(spec.model_dump_json(), encoding="utf-8")
+
+    signals = []
+    monkeypatch.setattr(service.os, "kill", lambda pid, signum: signals.append((pid, signum)))
+    monkeypatch.setattr(service, "_endpoint_matches_spec", lambda _spec: False)
+
+    service.stop_detached(_args())
+
+    assert signals == [(12345, 0)]
     assert not spec_dir.exists()
 
 
@@ -163,23 +188,91 @@ def test_process_state_marks_reused_pid_as_stale(tmp_path, monkeypatch):
     project.mkdir()
     spec = _spec(project, pid=12345)
     monkeypatch.setattr(service.os, "kill", lambda _pid, _signal: None)
-
-    completed = SimpleNamespace(returncode=0, stdout="python -m something.else\n")
-    monkeypatch.setattr(service.subprocess, "run", lambda *_args, **_kwargs: completed)
+    monkeypatch.setattr(service, "_endpoint_matches_spec", lambda _spec: False)
 
     assert service._process_state(spec) == "stale"
 
 
-def test_process_state_accepts_maco_internal_mcp_server_pid(tmp_path, monkeypatch):
+def test_process_state_accepts_matching_identity_endpoint(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
     spec = _spec(project, pid=12345)
     monkeypatch.setattr(service.os, "kill", lambda _pid, _signal: None)
-
-    completed = SimpleNamespace(returncode=0, stdout="python -m maco.cli _mcp-server --port 8789\n")
-    monkeypatch.setattr(service.subprocess, "run", lambda *_args, **_kwargs: completed)
+    monkeypatch.setattr(service, "_endpoint_matches_spec", lambda _spec: True)
 
     assert service._process_state(spec) == "running"
+
+
+def test_endpoint_matches_spec_requires_returned_identity(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    spec = _spec(project, pid=12345)
+    calls = []
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": spec.id, "identity_token": spec.identity_token}
+
+    def fake_get(url, *, timeout, trust_env):
+        calls.append((url, timeout, trust_env))
+        return FakeResponse()
+
+    monkeypatch.setattr(service.httpx, "get", fake_get)
+
+    assert service._endpoint_matches_spec(spec) is True
+    assert calls == [(f"http://127.0.0.1:{spec.port}/_maco/identity", 0.5, False)]
+
+
+def test_identity_url_uses_loopback_for_wildcard_bind(tmp_path):
+    project = tmp_path / "project"
+    project.mkdir()
+    spec = _spec(project, pid=12345).model_copy(update={"host": "0.0.0.0"})
+
+    assert service._identity_url(spec) == f"http://127.0.0.1:{spec.port}/_maco/identity"
+
+
+def test_endpoint_rejects_unrelated_maco_server_identity(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    spec = _spec(project, pid=12345)
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"id": "other-project", "identity_token": "other-token"}
+
+    monkeypatch.setattr(service.httpx, "get", lambda *_args, **_kwargs: FakeResponse())
+
+    assert service._endpoint_matches_spec(spec) is False
+
+
+def test_start_detached_reports_child_startup_failure_without_writing_spec(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "mcp.json").write_text('{"mcpServers":{"echo":{"command":"echo"}}}', encoding="utf-8")
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(service, "_is_port_available", lambda _host, _port: True)
+
+    class FailedProcess:
+        pid = 12345
+
+        def poll(self):
+            return 2
+
+    monkeypatch.setattr(service, "_spawn_detached", lambda _spec: FailedProcess())
+
+    with pytest.raises(ServiceError, match="exited during startup with code 2"):
+        start_detached(_args())
+
+    instance_id = service_id(project.resolve(), (project / ".maco").resolve())
+    spec_path = tmp_path / "home" / ".maco" / "state" / "instances" / instance_id / "spec.json"
+    assert not spec_path.exists()
 
 
 def test_explicit_busy_port_is_rejected(tmp_path, monkeypatch):
@@ -238,6 +331,7 @@ def _spec(project: Path, *, pid: int | None) -> ServiceSpec:
         url="http://127.0.0.1:8789/mcp",
         provider="local",
         command=["python", "-m", "maco.cli", "_mcp-server"],
+        identity_token="identity-token",
         pid=pid,
         stdout_log=str((project / "out.log").resolve()),
         stderr_log=str((project / "err.log").resolve()),

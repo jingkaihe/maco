@@ -7,6 +7,7 @@ import re
 import subprocess
 
 import pytest
+from starlette.testclient import TestClient
 
 from maco.sandbox import GatewayInfo, SandboxContext, SandboxExec, SandboxRunResult
 import maco.serve_mcp as serve_mcp_module
@@ -67,6 +68,23 @@ def test_result_payload_contains_only_tool_output_fields():
     payload = _result_payload(SandboxRunResult(0, "out", ""))
 
     assert payload == {"ok": True, "exit_code": 0, "stdout": "out", "stderr": ""}
+
+
+def test_serve_mcp_identity_route_returns_detached_identity(tmp_path):
+    context = _context(tmp_path)
+    provider = RecordingProvider()
+    app = create_serve_mcp_app(
+        provider,
+        context,
+        detached_service_id="project-123",
+        detached_service_token="identity-token",
+    )
+
+    with TestClient(app.streamable_http_app()) as client:
+        response = client.get("/_maco/identity")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": "project-123", "identity_token": "identity-token"}
 
 
 def test_serve_mcp_instructions_list_server_modules_and_rg_fd_discovery(tmp_path):
