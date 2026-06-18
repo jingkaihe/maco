@@ -33,7 +33,6 @@ _MCP_SERVER_COMMAND_KEYS = (
     "workspace",
     "clean",
     "scratch",
-    "gateway_file",
     "gateway_host",
     "gateway_port",
     "gateway_token",
@@ -121,7 +120,11 @@ def start_detached(args: Any) -> ServiceSpec:
             print("maco is already running for this project")
             _print_spec_details(existing, state="running")
             return existing
-        _stop_process(existing)
+        if not _stop_process(existing):
+            raise ServiceError(
+                "could not stop the existing detached maco process; "
+                "leaving the registry entry in place"
+            )
 
     _instance_dir(spec.id).mkdir(parents=True, exist_ok=True)
     _logs_root().mkdir(parents=True, exist_ok=True)
@@ -147,7 +150,17 @@ def stop_detached(args: Any) -> ServiceSpec | None:
         return None
     state = _process_state(spec)
     if state == "running":
-        _stop_process(spec)
+        if not _stop_process(spec):
+            raise ServiceError(
+                "could not confirm detached maco process stopped; "
+                "leaving the registry entry in place"
+            )
+        state = _process_state(spec)
+    if state != "stopped":
+        raise ServiceError(
+            f"detached maco process is {state}; "
+            "leaving the registry entry in place because the process was not confirmed stopped"
+        )
     shutil.rmtree(_instance_dir(spec.id), ignore_errors=True)
     print("Stopped maco detached process")
     _print_spec_details(spec, state="stopped")
@@ -303,26 +316,32 @@ def _spawn_detached(spec: ServiceSpec) -> subprocess.Popen[Any]:
         stderr.close()
 
 
-def _stop_process(spec: ServiceSpec) -> None:
+def _stop_process(spec: ServiceSpec) -> bool:
     if spec.pid is None:
-        return
+        return True
     if not _endpoint_matches_spec(spec):
-        return
+        return False
     try:
         os.kill(spec.pid, signal.SIGTERM)
     except ProcessLookupError:
-        return
+        return True
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if not _pid_exists(spec.pid):
-            return
+            return True
         time.sleep(0.1)
     if not _endpoint_matches_spec(spec):
-        return
+        return False
     try:
         os.kill(spec.pid, signal.SIGKILL)
     except ProcessLookupError:
-        return
+        return True
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if not _pid_exists(spec.pid):
+            return True
+        time.sleep(0.1)
+    return not _pid_exists(spec.pid)
 
 
 def _process_state(spec: ServiceSpec | None) -> str:

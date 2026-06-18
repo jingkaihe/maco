@@ -60,10 +60,6 @@ def _serve_mcp_options(*, port_default: int | None = DEFAULT_MCP_PORT) -> Any:
                 click.option("--workspace", default=".maco", help="generated workspace directory", show_default=True),
                 click.option("--clean", is_flag=True, help="remove the workspace before generating"),
                 click.option("--scratch", help="writable scratch directory for sandbox code"),
-                click.option(
-                    "--gateway-file",
-                    help="connect to an existing gateway.json instead of starting a managed gateway",
-                ),
                 click.option("--gateway-host", help="host for the managed gateway started by maco up"),
                 click.option(
                     "--gateway-port",
@@ -362,7 +358,6 @@ def _cmd_mcp_server(args: Any) -> int:
             workspace=args.workspace,
             clean=args.clean,
             scratch=args.scratch,
-            gateway_file=args.gateway_file,
             gateway_host=args.gateway_host,
             gateway_port=args.gateway_port,
             gateway_token=args.gateway_token,

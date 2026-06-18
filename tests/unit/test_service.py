@@ -101,6 +101,7 @@ def test_start_detached_restarts_when_existing_options_change(tmp_path, monkeypa
 
     def fake_stop(spec: ServiceSpec):
         stopped.append(spec.pid)
+        return True
 
     pids = iter([111, 222])
 
@@ -144,7 +145,7 @@ def test_stop_detached_removes_registry_and_sends_sigterm(tmp_path, monkeypatch)
     assert not spec_dir.exists()
 
 
-def test_stop_detached_does_not_signal_unverified_pid(tmp_path, monkeypatch):
+def test_stop_detached_keeps_registry_for_unverified_pid(tmp_path, monkeypatch):
     project = tmp_path / "project"
     project.mkdir()
     monkeypatch.chdir(project)
@@ -159,10 +160,11 @@ def test_stop_detached_does_not_signal_unverified_pid(tmp_path, monkeypatch):
     monkeypatch.setattr(service.os, "kill", lambda pid, signum: signals.append((pid, signum)))
     monkeypatch.setattr(service, "_endpoint_matches_spec", lambda _spec: False)
 
-    service.stop_detached(_args())
+    with pytest.raises(ServiceError, match="leaving the registry entry"):
+        service.stop_detached(_args())
 
     assert signals == [(12345, 0)]
-    assert not spec_dir.exists()
+    assert spec_dir.exists()
 
 
 def test_list_services_prints_project_rows(tmp_path, monkeypatch, capsys):
@@ -319,7 +321,6 @@ def _args(**overrides):
         "workspace": ".maco",
         "clean": False,
         "scratch": None,
-        "gateway_file": None,
         "gateway_host": None,
         "gateway_port": 0,
         "gateway_token": None,

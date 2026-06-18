@@ -22,8 +22,6 @@ from .codegen import fetch_gateway_tools, generate_sandbox_sdk, server_module_na
 from .config import load_config
 from .gateway import GatewayServer, ServeOptions
 from .sandbox import (
-    DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP,
-    DEFAULT_MATCHLOCK_GATEWAY_IP,
     GatewayInfo,
     SandboxContext,
     SandboxExec,
@@ -52,7 +50,6 @@ class ServeMcpOptions:
     workspace: str | Path = ".maco"
     clean: bool = False
     scratch: str | Path | None = None
-    gateway_file: str | Path | None = None
     gateway_host: str | None = None
     gateway_port: int = 0
     gateway_token: str | None = None
@@ -113,17 +110,10 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             if options.scratch is not None
             else default_scratch_path(workspace)
         )
-        gateway_file = (
-            Path(options.gateway_file).expanduser().resolve()
-            if options.gateway_file is not None
-            else workspace / "gateway.json"
-        )
         normalized_provider = _normalize_provider(options.provider)
-        managed_gateway = options.gateway_file is None
         docker_gateway_ip = (
             _docker_gateway_ip(
                 options.docker_gateway_ip,
-                managed_gateway=managed_gateway,
                 docker_binary=options.docker_binary,
                 docker_network=options.docker_network,
             )
@@ -131,52 +121,46 @@ def serve_mcp(options: ServeMcpOptions) -> None:
             else None
         )
         matchlock_gateway_ip = (
-            _matchlock_gateway_ip(
-                options.matchlock_gateway_ip,
-                managed_gateway=managed_gateway,
-                gateway_file=gateway_file,
-            )
+            options.matchlock_gateway_ip or default_matchlock_gateway_ip()
             if normalized_provider == "matchlock"
             else None
         )
-        if options.gateway_file is None:
-            config = load_config(options.config)
-            gateway_host = options.gateway_host or _default_gateway_host()
-            _validate_managed_gateway_bind(
-                normalized_provider,
-                explicit_gateway_host=options.gateway_host,
-                matchlock_gateway_ip=matchlock_gateway_ip,
-            )
-            extra_hosts = _gateway_extra_hosts(
-                normalized_provider,
-                docker_gateway_ip=docker_gateway_ip,
-                matchlock_gateway_ip=matchlock_gateway_ip,
-                explicit_gateway_host=options.gateway_host,
-            )
-            gateway_server = GatewayServer(
-                config,
-                ServeOptions(
-                    host=gateway_host,
-                    port=options.gateway_port,
-                    workspace=workspace,
-                    token=options.gateway_token,
-                    use_token=options.gateway_use_token,
+        config = load_config(options.config)
+        gateway_host = options.gateway_host or _default_gateway_host()
+        _validate_managed_gateway_bind(
+            normalized_provider,
+            explicit_gateway_host=options.gateway_host,
+            matchlock_gateway_ip=matchlock_gateway_ip,
+        )
+        extra_hosts = _gateway_extra_hosts(
+            normalized_provider,
+            docker_gateway_ip=docker_gateway_ip,
+            matchlock_gateway_ip=matchlock_gateway_ip,
+            explicit_gateway_host=options.gateway_host,
+        )
+        gateway_server = GatewayServer(
+            config,
+            ServeOptions(
+                host=gateway_host,
+                port=options.gateway_port,
+                workspace=workspace,
+                token=options.gateway_token,
+                use_token=options.gateway_use_token,
+                extra_hosts=extra_hosts,
+                freebind_hosts=_gateway_freebind_hosts(
+                    gateway_host,
                     extra_hosts=extra_hosts,
-                    freebind_hosts=_gateway_freebind_hosts(
-                        gateway_host,
-                        extra_hosts=extra_hosts,
-                        docker_gateway_ip=docker_gateway_ip,
-                        matchlock_gateway_ip=matchlock_gateway_ip,
-                    ),
+                    docker_gateway_ip=docker_gateway_ip,
+                    matchlock_gateway_ip=matchlock_gateway_ip,
                 ),
-            ).start()
-            gateway_file = gateway_server.gateway_file
-            print("maco gateway started")
-            print(f"  URL: {gateway_server.url}")
-            for url in gateway_server.extra_urls:
-                print(f"  extra URL: {url}")
-            print(f"  gateway file: {gateway_file}")
-        gateway = GatewayInfo.from_file(gateway_file)
+            ),
+        ).start()
+        print("maco gateway started")
+        print(f"  URL: {gateway_server.url}")
+        for url in gateway_server.extra_urls:
+            print(f"  extra URL: {url}")
+        print(f"  gateway file: {gateway_server.gateway_file}")
+        gateway = GatewayInfo(url=gateway_server.url, token=gateway_server.token)
         tools_by_server = fetch_gateway_tools(gateway.url, token=gateway.token)
         modules = sorted(server_module_names(tools_by_server.keys()).values())
         if options.provider.replace("_", "-").lower() == "local":
@@ -424,7 +408,7 @@ def _validate_managed_gateway_bind(
         return
     raise ValueError(
         "matchlock managed gateway requires an explicit --gateway-host on this platform; "
-        "use --gateway-host 0.0.0.0 to expose the gateway to the sandbox, or pass --gateway-file"
+        "use --gateway-host 0.0.0.0 to expose the gateway to the sandbox"
     )
 
 
@@ -432,37 +416,14 @@ def _normalize_provider(provider: str) -> str:
     return provider.replace("_", "-").lower()
 
 
-def _matchlock_gateway_ip(
-    configured_ip: str | None,
-    *,
-    managed_gateway: bool,
-    gateway_file: Path,
-) -> str | None:
-    if configured_ip:
-        return configured_ip
-    if managed_gateway:
-        return default_matchlock_gateway_ip()
-    try:
-        gateway = GatewayInfo.from_file(gateway_file)
-    except Exception:
-        return None
-    host = _url_host(gateway.url)
-    if host in {DEFAULT_MATCHLOCK_GATEWAY_IP, DEFAULT_MATCHLOCK_DARWIN_GATEWAY_IP}:
-        return host
-    return None
-
-
 def _docker_gateway_ip(
     configured_ip: str | None,
     *,
-    managed_gateway: bool,
     docker_binary: str,
     docker_network: str | None,
 ) -> str | None:
     if configured_ip:
         return configured_ip
-    if not managed_gateway:
-        return None
     if _is_docker_desktop(docker_binary):
         return None
     detected_ip = _detect_docker_gateway_ip(docker_binary, docker_network)
@@ -566,12 +527,6 @@ def _provider_gateway_ip(
     if provider == "matchlock":
         return matchlock_gateway_ip
     return None
-
-
-def _url_host(url: str) -> str | None:
-    from urllib.parse import urlsplit
-
-    return urlsplit(url).hostname
 
 
 def _result_payload(result: SandboxRunResult) -> dict[str, Any]:
