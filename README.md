@@ -128,9 +128,16 @@ See [`docs/mcp-config.md`](docs/mcp-config.md) for the full config reference, in
 
 Choose the execution provider with `--provider`:
 
-- `local`: fastest feedback loop; runs commands as local subprocesses.
-- `docker`: runs commands in a long-lived Docker container.
-- `matchlock`: runs commands in a long-lived Matchlock micro-VM.
+- `local`: ideally for local development and fast feedback loop, or maco is already running in an isolated sandbox.
+- `docker`: runs mcp bash and code execution in a long-lived Docker container.
+- `matchlock`: runs mcp bash and code execution in a long-lived Matchlock micro-VM.
+
+## Credits
+
+`maco` is inspired by and builds on ideas from:
+
+- [Code execution with MCP: Building more efficient agents](https://www.anthropic.com/engineering/code-execution-with-mcp)
+- [Code Mode: the better way to use MCP](https://blog.cloudflare.com/code-mode/)
 
 ## License
 
